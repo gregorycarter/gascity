@@ -151,6 +151,7 @@ func newEventsCmd(stdout, stderr io.Writer) *cobra.Command {
 	var apiURL string
 	var typeFilter string
 	var sinceFlag string
+	var limitFlag int64
 	var watchFlag bool
 	var followFlag bool
 	var seqFlag bool
@@ -174,6 +175,7 @@ List, watch, and follow output are always JSON Lines. Each line is one API
 DTO or SSE envelope.`,
 		Example: `  gc events
   gc events --type bead.created --since 1h
+  gc events --since 24h --limit 500
   gc events --watch --type convoy.closed --timeout 5m
   gc events --follow
   gc events --seq
@@ -182,6 +184,14 @@ DTO or SSE envelope.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if afterFlag > 0 && strings.TrimSpace(afterCursor) != "" {
 				fmt.Fprintln(stderr, "gc events: --after and --after-cursor are mutually exclusive") //nolint:errcheck
+				return errExit
+			}
+			if limitFlag < 0 {
+				fmt.Fprintln(stderr, "gc events: --limit must be non-negative") //nolint:errcheck
+				return errExit
+			}
+			if limitFlag > 0 && (followFlag || watchFlag || seqFlag) {
+				fmt.Fprintln(stderr, "gc events: --limit applies to the list form only; --watch/--follow stream and --seq prints a cursor") //nolint:errcheck
 				return errExit
 			}
 			// --after/--after-cursor resume a stream; the plain list and --seq
@@ -210,7 +220,7 @@ DTO or SSE envelope.`,
 				}
 				return nil
 			}
-			if cmdEvents(apiURL, typeFilter, sinceFlag, payloadMatch, stdout, stderr) != 0 {
+			if cmdEvents(apiURL, typeFilter, sinceFlag, payloadMatch, limitFlag, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -219,6 +229,7 @@ DTO or SSE envelope.`,
 	cmd.Flags().StringVar(&apiURL, "api", "", "GC API server URL override (auto-discovered by default)")
 	cmd.Flags().StringVar(&typeFilter, "type", "", "Filter by event type (e.g. bead.created)")
 	cmd.Flags().StringVar(&sinceFlag, "since", "", "Show events since duration ago (e.g. 1h, 30m)")
+	cmd.Flags().Int64Var(&limitFlag, "limit", 0, "Return at most this many events (the newest matching); 0 = scope default")
 	cmd.Flags().BoolVar(&watchFlag, "watch", false, "Block until matching events arrive (exits after first match or buffered replay)")
 	cmd.Flags().BoolVar(&followFlag, "follow", false, "Continuously stream events as they arrive")
 	cmd.Flags().BoolVar(&seqFlag, "seq", false, "Print the current head cursor and exit")
@@ -258,7 +269,7 @@ Output is one JSON line. Empty active logs are successful no-ops.`,
 	return cmd
 }
 
-func cmdEvents(apiURLOverride, typeFilter, sinceFlag string, payloadMatchArgs []string, stdout, stderr io.Writer) int {
+func cmdEvents(apiURLOverride, typeFilter, sinceFlag string, payloadMatchArgs []string, limit int64, stdout, stderr io.Writer) int {
 	if err := validateEventsSince(sinceFlag); err != nil {
 		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck
 		return 1
@@ -272,7 +283,7 @@ func cmdEvents(apiURLOverride, typeFilter, sinceFlag string, payloadMatchArgs []
 	if code != 0 {
 		return code
 	}
-	return doEvents(scope, typeFilter, sinceFlag, pm, stdout, stderr)
+	return doEvents(scope, typeFilter, sinceFlag, pm, limit, stdout, stderr)
 }
 
 func cmdEventsSeq(apiURLOverride string, stdout, stderr io.Writer) int {
@@ -547,7 +558,15 @@ func validateEventsSince(sinceFlag string) error {
 	return nil
 }
 
-func doEvents(scope eventsAPIScope, typeFilter, sinceFlag string, payloadMatch map[string][]string, stdout, stderr io.Writer) int {
+func doEvents(scope eventsAPIScope, typeFilter, sinceFlag string, payloadMatch map[string][]string, limit int64, stdout, stderr io.Writer) int {
+	// --payload-match filters client-side, so a fetch-layer cap could satisfy
+	// itself with events the filter then drops. With a payload filter the fetch
+	// stays uncapped and --limit trims the filtered result instead.
+	fetchCap := limit
+	if len(payloadMatch) > 0 {
+		fetchCap = 0
+	}
+
 	if scope.localOnly {
 		fallback, _, fallbackErr := readLocalCityEvents(scope, stoppedCityLocalFallbackError(scope), typeFilter, sinceFlag, stderr)
 		if fallbackErr != nil {
@@ -555,7 +574,7 @@ func doEvents(scope eventsAPIScope, typeFilter, sinceFlag string, payloadMatch m
 			return 1
 		}
 		fallback = filterCityEvents(fallback, 0, typeFilter, payloadMatch)
-		return printJSONLines(fallback, stdout, stderr)
+		return printJSONLines(newestEvents(fallback, limit), stdout, stderr)
 	}
 
 	client, err := scope.client()
@@ -564,20 +583,23 @@ func doEvents(scope eventsAPIScope, typeFilter, sinceFlag string, payloadMatch m
 		return 1
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	if scope.isSupervisor() {
-		items, err := fetchSupervisorEvents(ctx, client, typeFilter, sinceFlag)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		items, err := fetchSupervisorEventsWithLimit(ctx, client, typeFilter, sinceFlag, fetchCap)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck
 			return 1
 		}
 		items = filterSupervisorEvents(items, typeFilter, payloadMatch)
-		return printJSONLines(items, stdout, stderr)
+		return printJSONLines(newestEvents(items, limit), stdout, stderr)
 	}
 
-	items, err := fetchCityEvents(ctx, client, scope.cityName, typeFilter, sinceFlag, stderr)
+	// No whole-drain deadline here: fetchCityEvents bounds each page request
+	// individually, so a wide --since window can drain more pages than one
+	// fixed timeout allows (ga-78r: a 24h window over a busy city exceeded a
+	// single 30s deadline mid-pagination and reported nothing).
+	items, err := fetchCityEvents(context.Background(), client, scope.cityName, typeFilter, sinceFlag, fetchCap, stderr)
 	if err != nil {
 		if fallback, ok, fallbackErr := readLocalCityEvents(scope, err, typeFilter, sinceFlag, stderr); ok {
 			if fallbackErr != nil {
@@ -585,13 +607,22 @@ func doEvents(scope eventsAPIScope, typeFilter, sinceFlag string, payloadMatch m
 				return 1
 			}
 			fallback = filterCityEvents(fallback, 0, typeFilter, payloadMatch)
-			return printJSONLines(fallback, stdout, stderr)
+			return printJSONLines(newestEvents(fallback, limit), stdout, stderr)
 		}
 		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck
 		return 1
 	}
 	items = filterCityEvents(items, 0, typeFilter, payloadMatch)
-	return printJSONLines(items, stdout, stderr)
+	return printJSONLines(newestEvents(items, limit), stdout, stderr)
+}
+
+// newestEvents returns the newest limit items from an ascending-seq slice.
+// limit <= 0 means no cap.
+func newestEvents[T any](items []T, limit int64) []T {
+	if limit <= 0 || int64(len(items)) <= limit {
+		return items
+	}
+	return items[int64(len(items))-limit:]
 }
 
 func doEventsSeq(scope eventsAPIScope, stdout, stderr io.Writer) int {
@@ -1039,6 +1070,12 @@ func probeCityEventsReachable(ctx context.Context, client *genclient.ClientWithR
 // strictly below the page's oldest seq (#4194).
 const cityEventsPageLimit = int64(500)
 
+// cityEventsPageRequestTimeout bounds one page request of the city event list.
+// The timeout is per page, not per drain: a multi-page --since walk holds no
+// overall deadline, so wide windows finish page by page instead of dying
+// mid-pagination (ga-78r).
+const cityEventsPageRequestTimeout = 30 * time.Second
+
 // fetchCityEvents fetches city events matching the type/since filter and
 // returns them chronologically (ascending seq). The endpoint is a keyset,
 // seq-DESC (newest first) paginated list; a truncated page carries a
@@ -1046,14 +1083,17 @@ const cityEventsPageLimit = int64(500)
 //
 // A bounded --since window is drained across pages so the requested window is
 // reported in full — otherwise any window holding more than one page of events
-// silently under-reports (the bug this fixes). Without --since the request is
-// unbounded, so the fetch stays a single page: gc events means "recent
-// activity", and a full descending drain of a 100 MB+ event history would blow
-// the command timeout for no user benefit. In that single-page case, when the
-// server signals more via next_cursor, an explicit truncation notice is written
-// to warn rather than silently dropping the older matches.
-func fetchCityEvents(ctx context.Context, client *genclient.ClientWithResponses, cityName, typeFilter, sinceFlag string, warn io.Writer) ([]cliWireEvent, error) {
-	paginate := strings.TrimSpace(sinceFlag) != ""
+// silently under-reports (the bug this fixes). fetchCap > 0 additionally stops
+// the walk once that many events are collected: pages arrive newest-first, so
+// the collected prefix is the newest fetchCap matches and older pages cannot
+// change it. Without --since and without a cap the request is unbounded, so the
+// fetch stays a single page: gc events means "recent activity", and a full
+// descending drain of a 100 MB+ event history would take unbounded time for no
+// user benefit. In that single-page case, when the server signals more via
+// next_cursor, an explicit truncation notice is written to warn rather than
+// silently dropping the older matches.
+func fetchCityEvents(ctx context.Context, client *genclient.ClientWithResponses, cityName, typeFilter, sinceFlag string, fetchCap int64, warn io.Writer) ([]cliWireEvent, error) {
+	paginate := strings.TrimSpace(sinceFlag) != "" || fetchCap > 0
 	var all []cliWireEvent
 	cursor := ""
 	for {
@@ -1070,7 +1110,9 @@ func fetchCityEvents(ctx context.Context, client *genclient.ClientWithResponses,
 		if cursor != "" {
 			params.Cursor = &cursor
 		}
-		resp, err := client.GetV0CityByCityNameEventsWithResponse(ctx, cityName, params)
+		pageCtx, cancelPage := context.WithTimeout(ctx, cityEventsPageRequestTimeout)
+		resp, err := client.GetV0CityByCityNameEventsWithResponse(pageCtx, cityName, params)
+		cancelPage()
 		if err != nil {
 			return nil, &eventsAPITransportError{err: err}
 		}
@@ -1086,6 +1128,9 @@ func fetchCityEvents(ctx context.Context, client *genclient.ClientWithResponses,
 				return nil, fmt.Errorf("decoding city event list item: %w", err)
 			}
 			all = append(all, wire)
+		}
+		if fetchCap > 0 && int64(len(all)) >= fetchCap {
+			break // the newest fetchCap matches are collected; older pages cannot change them
 		}
 		next := ""
 		if resp.JSON200.NextCursor != nil {

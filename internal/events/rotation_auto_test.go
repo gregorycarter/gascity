@@ -167,10 +167,12 @@ func TestNewFileRecorderReapsOrphansOnOpen(t *testing.T) {
 	if err := os.WriteFile(rotating, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	backdatePastSweepAge(t, rotating)
 	tmpOrphan := filepath.Join(dir, "events.jsonl.archive-20260101T000000Z-seq-1-2.gz.tmp")
 	if err := os.WriteFile(tmpOrphan, []byte("incomplete"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	backdatePastSweepAge(t, tmpOrphan)
 
 	var stderr bytes.Buffer
 	rec, err := NewFileRecorder(path, &stderr)
@@ -214,6 +216,7 @@ func TestNewFileRecorderSeedsSeqFromArchives(t *testing.T) {
 	if err := os.WriteFile(rotating, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	backdatePastSweepAge(t, rotating)
 
 	var stderr bytes.Buffer
 	rec, err := NewFileRecorder(path, &stderr)

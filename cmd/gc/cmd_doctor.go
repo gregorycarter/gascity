@@ -288,6 +288,13 @@ func buildDoctorChecks(cityPath string, cfg *config.City, cfgErr error, opts bui
 		register(newBacklogDepthCheck(cityPath, storeFactory))
 		register(newOrderTrackingRetentionCheck(cityPath, storeFactory))
 		register(&sessionModelDoctorCheck{cfg: cfg, cityPath: cityPath, newStore: storeFactory})
+		// ga-78r: event-stream freshness smoke check. Registered regardless of
+		// controller state — the check is inert unless agent sessions are live
+		// AND beads changed recently, and exactly that combination with a
+		// silent event log is the failure it must catch loudly.
+		if sp, err := newSessionProvider(); err == nil {
+			register(newEventsFreshnessCheck(cfg, loadedCityName(cfg, cityPath), sp, storeFactory, cityPath))
+		}
 	}
 	register(newDoctorDoltServerCheck(cityPath, opts.SkipCityDoltCheck))
 	// Host-level fork-rate watch: surfaces the per-command data-plane fork storm

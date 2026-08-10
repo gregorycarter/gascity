@@ -230,7 +230,7 @@ Reliability reports per-(model, prompt_version, rig) counts of
 the tracked session-lifecycle events:
 
   session.crashed
-  session.quarantined (reserved; current production paths do not emit it)
+  session.quarantined (emitted on wake-failure, churn, and rate-limit quarantines)
   session.idle_killed
   session.draining
 
@@ -1501,6 +1501,7 @@ gc events [flags]
 ```
 gc events
 gc events --type bead.created --since 1h
+gc events --since 24h --limit 500
 gc events --watch --type convoy.closed --timeout 5m
 gc events --follow
 gc events --seq
@@ -1513,6 +1514,7 @@ gc events --follow --after-cursor city-a:12,city-b:9
 | `--after-cursor` | string |  | Resume from this supervisor event cursor (supervisor scope only) |
 | `--api` | string |  | GC API server URL override (auto-discovered by default) |
 | `--follow` | bool |  | Continuously stream events as they arrive |
+| `--limit` | int64 |  | Return at most this many events (the newest matching); 0 = scope default |
 | `--payload-match` | stringArray |  | Filter by payload field (key=value or key.subkey=value, repeatable) |
 | `--seq` | bool |  | Print the current head cursor and exit |
 | `--since` | string |  | Show events since duration ago (e.g. 1h, 30m) |

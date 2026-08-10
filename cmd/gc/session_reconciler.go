@@ -1707,7 +1707,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					// info == infoByID[id] here (pre-heal region; every reachable
 					// mutation continues), so the write-returns-Info result advances the
 					// snapshot identically (Step 6d write-returns-Info, group 1).
-					rlNext, rateLimitHit, rateLimitErr := checkRateLimitStability(info, cfg, providerAlive, dt, sessFront, clk, peek)
+					rlNext, rateLimitHit, rateLimitErr := checkRateLimitStability(info, cfg, providerAlive, dt, sessFront, clk, peek, rec)
 					if rateLimitHit || rateLimitErr != nil {
 						tick.set(id, rlNext)
 						continue
@@ -1762,7 +1762,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					obs, obsErr := workerObserveSessionTargetWithRuntimeHintsWithConfig(cityPath, store, sp, cfg, id, preservedTP.Hints.ProcessNames)
 					rateLimitAlive := rateLimitAliveFromObservation(obs.Alive, obsErr)
 					peek := cachedSessionPeek(cityPath, store, sp, cfg, id, preservedTP.Hints.ProcessNames)
-					rlNextNamed, rateLimitHit, rateLimitErr = checkRateLimitStability(info, cfg, rateLimitAlive, dt, sessFront, clk, peek)
+					rlNextNamed, rateLimitHit, rateLimitErr = checkRateLimitStability(info, cfg, rateLimitAlive, dt, sessFront, clk, peek, rec)
 				}
 			}
 			if rateLimitHit || rateLimitErr != nil {
@@ -2234,7 +2234,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 			if pendingCreateLeaseExpiredForRollbackInfo(infoPostZombie, clk, startupTimeout) {
 				// infoPostZombie == infoByID[id] here, so the write-returns-Info
 				// result advances the snapshot identically (Step 6d, group 1).
-				rlNext, rateLimitHit, rateLimitErr := checkRateLimitStability(infoPostZombie, cfg, alive, dt, sessFront, clk, peek)
+				rlNext, rateLimitHit, rateLimitErr := checkRateLimitStability(infoPostZombie, cfg, alive, dt, sessFront, clk, peek, rec)
 				if rateLimitHit || rateLimitErr != nil {
 					tick.set(id, rlNext)
 					continue
@@ -2609,7 +2609,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 
 		policy := resolveSessionSleepPolicyInfo(infoByID[id], cfg, sp)
 
-		rlNextFwd, rateLimitHit, rateLimitErr := checkRateLimitStability(infoByID[id], cfg, alive, dt, sessFront, clk, peek)
+		rlNextFwd, rateLimitHit, rateLimitErr := checkRateLimitStability(infoByID[id], cfg, alive, dt, sessFront, clk, peek, rec)
 		if rateLimitHit || rateLimitErr != nil {
 			// Advance the snapshot with the write-returns-Info result (Step 6d, group 1).
 			tick.set(id, rlNextFwd)
@@ -2665,7 +2665,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 		// checkStability returns the write-returns-Info result (Step 6d); the input
 		// Info unchanged when no stability event was recorded, so the assignment on the
 		// true branch is the only snapshot advance. Pre-pass-masked (STEP6-PREPASS-AUDIT group 2).
-		if stabInfo, stab := checkStability(infoByID[id], cfg, alive, dt, sessFront, clk, nil); stab {
+		if stabInfo, stab := checkStability(infoByID[id], cfg, alive, dt, sessFront, clk, nil, rec); stab {
 			tick.set(id, stabInfo)
 			continue // rapid exit recorded, skip further processing
 		}
@@ -2677,7 +2677,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 		// Assign checkChurn's write-returns-Info result regardless of the bool —
 		// ExitProductiveDeath may clear churn_count (the default rapid-crash path
 		// returns the input Info unchanged). Pre-pass-masked (STEP6-PREPASS-AUDIT group 5).
-		churnInfo, churn := checkChurn(infoByID[id], cfg, alive, dt, sessFront, clk)
+		churnInfo, churn := checkChurn(infoByID[id], cfg, alive, dt, sessFront, clk, rec)
 		tick.set(id, churnInfo)
 		if churn {
 			continue // churn recorded, skip further processing

@@ -1086,6 +1086,65 @@ func newFileEventsRecorder(eventsPath string, eventsCfg config.EventsConfig, std
 	return events.NewFileRecorder(eventsPath, stderr, eventsFileRecorderOptions(eventsCfg, stderr)...)
 }
 
+// workerEventsRecorderForCity returns the events recorder that worker-boundary
+// factories thread into session handles so lifecycle operations (start, stop,
+// kill, nudge, message, ...) emit worker.operation telemetry. Without it,
+// `gc analyze reliability` has no session index and skips every lifecycle
+// event (ga-78r).
+//
+// Provider resolution mirrors openCityEventsProvider — GC_EVENTS overrides
+// city.toml [events].provider — but takes the already-resolved city path and
+// config instead of re-discovering the city. A nil return disables recording:
+// no city path means no durable log home (exec/fake/fail providers carry their
+// own backend and stay valid without one).
+func workerEventsRecorderForCity(cfg *config.City, cityPath string) events.Recorder {
+	provider := ""
+	if cfg != nil {
+		provider = strings.TrimSpace(cfg.Events.Provider)
+	}
+	if v := strings.TrimSpace(os.Getenv("GC_EVENTS")); v != "" {
+		provider = v
+	}
+	switch {
+	case strings.HasPrefix(provider, "exec:"):
+		return eventsexec.NewProvider(strings.TrimPrefix(provider, "exec:"), os.Stderr)
+	case provider == "fake":
+		return events.NewFake()
+	case provider == "fail":
+		return events.NewFailFake()
+	}
+	if strings.TrimSpace(cityPath) == "" {
+		return nil
+	}
+	return &lazyEventsFileRecorder{path: filepath.Join(cityPath, ".gc", "events.jsonl")}
+}
+
+// lazyEventsFileRecorder appends one event per open-append-close cycle. Worker
+// factories are constructed per operation on long-lived paths (the session
+// reconciler builds one per lifecycle call), so holding an open FileRecorder
+// per factory would leak one fd per operation for the life of the process.
+// Opening per Record keeps the factory construction free and leak-proof; the
+// flock + seq re-read inside FileRecorder.Record makes concurrent writers
+// safe. Rotation options are deliberately omitted: rotating the shared city
+// log belongs to the long-lived supervisor/controller recorder, and a
+// short-lived writer racing that rotation could double-rotate.
+type lazyEventsFileRecorder struct {
+	path string
+}
+
+// Record appends e to the city event log. Best-effort like every
+// events.Recorder: failures are reported on stderr, never returned, and must
+// not block the session data plane.
+func (r *lazyEventsFileRecorder) Record(e events.Event) {
+	rec, err := events.NewFileRecorder(r.path, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "events: worker operation record: %v\n", err) //nolint:errcheck // best-effort stderr
+		return
+	}
+	defer rec.Close() //nolint:errcheck // append-only log; Record already reported errors
+	rec.Record(e)
+}
+
 // openCityEventsProvider resolves the city and returns an events.Provider.
 // Returns (nil, exitCode) on failure.
 func openCityEventsProvider(stderr io.Writer, cmdName string) (events.Provider, int) {

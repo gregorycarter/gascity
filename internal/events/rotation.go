@@ -86,13 +86,25 @@ func gzipAndArchive(source, dest string, stderr io.Writer) error {
 	return nil
 }
 
+// orphanSweepMinAge is how old a rotating-* or *.gz.tmp file must be before
+// the startup sweep treats it as orphaned. Rotation compression completes in
+// seconds, so anything younger is an IN-FLIGHT rotation owned by another live
+// recorder — several recorders can open the same log concurrently (the
+// supervisor's long-lived recorder plus short-lived per-operation writers,
+// ga-78r), and reaping a fresh tmp/rotating file would delete or double-gzip
+// bytes that owner is still writing. A genuinely crashed rotation is reaped by
+// whichever open happens after the age threshold.
+const orphanSweepMinAge = 10 * time.Minute
+
 // reapOrphanedRotatingFiles cleans up rotation-era artifacts on
 // startup: each legacy events.jsonl.archive-YYYYMMDD.gz file is
 // renamed into the canonical seq-stamped convention, each
 // events.jsonl.rotating-<ts> file is gzipped into its canonical
 // archive name (the seq window is read from the rotating file's first
 // and last lines when the filename lacks seqs), and each *.gz.tmp is
-// removed outright (an incomplete gzip cannot be salvaged).
+// removed outright (an incomplete gzip cannot be salvaged). Rotating
+// and tmp files younger than orphanSweepMinAge are skipped — they
+// belong to a rotation still in flight in another process.
 //
 // The sweep is idempotent: re-running it on a clean directory is a
 // no-op. Failures on individual files are logged to stderr and the
@@ -110,6 +122,14 @@ func reapOrphanedRotatingFiles(dir string, stderr io.Writer) error {
 		return fmt.Errorf("listing %q: %w", dir, err)
 	}
 
+	orphaned := func(e os.DirEntry) bool {
+		info, err := e.Info()
+		if err != nil {
+			return false // vanished mid-sweep; nothing to reap
+		}
+		return time.Since(info.ModTime()) >= orphanSweepMinAge
+	}
+
 	var legacyArchives []string
 	var rotatings []string
 	for _, e := range entries {
@@ -121,8 +141,13 @@ func reapOrphanedRotatingFiles(dir string, stderr io.Writer) error {
 		case isLegacyArchiveBasename(name):
 			legacyArchives = append(legacyArchives, name)
 		case hasRotatingPrefix(name):
-			rotatings = append(rotatings, name)
+			if orphaned(e) {
+				rotatings = append(rotatings, name)
+			}
 		case hasGzipTmpSuffix(name):
+			if !orphaned(e) {
+				continue
+			}
 			path := filepath.Join(dir, name)
 			if err := os.Remove(path); err != nil {
 				fmt.Fprintf(stderr, "events: rotation: removing stale %q: %v\n", name, err) //nolint:errcheck // best-effort stderr

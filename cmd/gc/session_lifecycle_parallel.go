@@ -2220,7 +2220,7 @@ func commitStartFailure(result startResult, sessFront *sessionpkg.Store, clk clo
 	if result.rateLimitScreen {
 		// Terminal failure arm; discard the fold (see the terminal-provider-error note
 		// above). The persist lands via recordRateLimitQuarantine's ApplyPatchInfo.
-		if _, rlErr := recordRateLimitQuarantine(result.prepared.candidate.info, sessFront, clk); rlErr != nil {
+		if _, rlErr := recordRateLimitQuarantine(result.prepared.candidate.info, sessFront, clk, tp.DisplayName(), rec); rlErr != nil {
 			fmt.Fprintf(stderr, "session reconciler: recording startup rate-limit hold for %s: %v\n", name, rlErr) //nolint:errcheck
 			if trace != nil {
 				trace.RecordOperation(TraceSiteLifecycleStartRateLimitHold, TraceReasonStart, TraceOutcomeHoldDeferred, "", tp.TemplateName, name, 0, traceRecordPayload{
@@ -2276,7 +2276,7 @@ func commitStartFailure(result startResult, sessFront *sessionpkg.Store, clk clo
 	// not carry it. Terminal failure arm; discard the fold (never assign back into
 	// infoByID — this is the async start goroutine). The persist lands via
 	// recordWakeFailure's ApplyPatchInfo/SetMarker writes.
-	_ = recordWakeFailure(result.prepared.candidate.info, sessFront, clk, tp.DisplayName())
+	_ = recordWakeFailure(result.prepared.candidate.info, sessFront, clk, tp.DisplayName(), rec)
 	if trace != nil {
 		trace.RecordOperation(TraceSiteLifecycleStartFailed, TraceReasonStart, result.outcome, "", tp.TemplateName, name, 0, traceRecordPayload{
 			"error": formatLifecycleError(result.err),

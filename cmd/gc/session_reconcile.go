@@ -23,6 +23,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/clock"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/runtime"
 	sessionpkg "github.com/gastownhall/gascity/internal/session"
@@ -475,14 +476,14 @@ func healExpiredTimersInfo(info sessionpkg.Info, sessFront *sessionpkg.Store, cl
 // snapshot advanced by every write on that path (front-door migration Step 6d,
 // write-returns-Info, STEP6-PREPASS-AUDIT group 2). Returns (info, false)
 // otherwise with the input Info unchanged (no write occurred).
-func checkStability(info sessionpkg.Info, cfg *config.City, alive bool, dt *drainTracker, sessFront *sessionpkg.Store, clk clock.Clock, peek func(lines int) (string, error)) (sessionpkg.Info, bool) {
-	if next, handled, err := checkRateLimitStability(info, cfg, alive, dt, sessFront, clk, peek); handled || err != nil {
+func checkStability(info sessionpkg.Info, cfg *config.City, alive bool, dt *drainTracker, sessFront *sessionpkg.Store, clk clock.Clock, peek func(lines int) (string, error), rec events.Recorder) (sessionpkg.Info, bool) {
+	if next, handled, err := checkRateLimitStability(info, cfg, alive, dt, sessFront, clk, peek, rec); handled || err != nil {
 		return next, true
 	}
 	if sessionpkg.DecideSessionExit(sessionExitFactsInfo(info, cfg, alive, dt, clk)) != sessionpkg.ExitRapidCrash {
 		return info, false
 	}
-	info = recordWakeFailure(info, sessFront, clk, sessionAgentMetricIdentityInfo(info, cfg))
+	info = recordWakeFailure(info, sessFront, clk, sessionAgentMetricIdentityInfo(info, cfg), rec)
 	info = clearLastWokeAt(info, sessFront)
 	return info, true
 }
@@ -502,7 +503,7 @@ func checkStability(info sessionpkg.Info, cfg *config.City, alive bool, dt *drai
 // (front-door migration Step 6d, write-returns-Info, STEP6-PREPASS-AUDIT group 1).
 // On every path that writes nothing (no-hit or persist error) the input Info is
 // returned unchanged.
-func checkRateLimitStability(info sessionpkg.Info, cfg *config.City, alive bool, dt *drainTracker, sessFront *sessionpkg.Store, clk clock.Clock, peek func(lines int) (string, error)) (sessionpkg.Info, bool, error) {
+func checkRateLimitStability(info sessionpkg.Info, cfg *config.City, alive bool, dt *drainTracker, sessFront *sessionpkg.Store, clk clock.Clock, peek func(lines int) (string, error), rec events.Recorder) (sessionpkg.Info, bool, error) {
 	facts := sessionExitFactsInfo(info, cfg, alive, dt, clk)
 	facts.ScreenAvailable = peek != nil
 	dec := sessionpkg.DecideSessionExit(facts)
@@ -525,7 +526,7 @@ func checkRateLimitStability(info sessionpkg.Info, cfg *config.City, alive bool,
 	if dec != sessionpkg.ExitRateLimitQuarantine {
 		return info, false, nil
 	}
-	next, err := recordRateLimitQuarantine(info, sessFront, clk)
+	next, err := recordRateLimitQuarantine(info, sessFront, clk, sessionAgentMetricIdentityInfo(info, cfg), rec)
 	if err != nil {
 		return info, false, err
 	}
@@ -574,14 +575,38 @@ func clearLastWokeAt(info sessionpkg.Info, sessFront *sessionpkg.Store) sessionp
 // advances the typed snapshot with the quarantine write (front-door migration
 // Step 6d, write-returns-Info); returns (info unchanged, err) on persist failure
 // (ApplyPatchInfo leaves the snapshot pinned to the rejected write).
-func recordRateLimitQuarantine(info sessionpkg.Info, sessFront *sessionpkg.Store, clk clock.Clock) (sessionpkg.Info, error) {
-	batch := sessionpkg.RateLimitQuarantinePatch(clk.Now().Add(defaultRateLimitQuarantineDuration))
+func recordRateLimitQuarantine(info sessionpkg.Info, sessFront *sessionpkg.Store, clk clock.Clock, agentIdentity string, rec events.Recorder) (sessionpkg.Info, error) {
+	until := clk.Now().Add(defaultRateLimitQuarantineDuration)
+	batch := sessionpkg.RateLimitQuarantinePatch(until)
 	next, err := sessFront.ApplyPatchInfo(info, batch)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "recordRateLimitQuarantine: SetMetadataBatch %s: %v\n", info.ID, err) //nolint:errcheck
 		return info, err
 	}
+	recordSessionQuarantinedEvent(rec, agentIdentity, info.ID,
+		fmt.Sprintf("provider rate-limit backoff until %s", until.UTC().Format(time.RFC3339)))
 	return next, nil
+}
+
+// recordSessionQuarantinedEvent emits session.quarantined so reliability
+// tooling can attribute quarantine decisions to a session (ga-78r: the event
+// type was registered and reported on but never emitted by any production
+// path). Best-effort: a nil recorder (no city event log in scope) skips
+// emission; the quarantine metadata write is the durable record either way.
+func recordSessionQuarantinedEvent(rec events.Recorder, agentIdentity, sessionID, reason string) {
+	if rec == nil {
+		return
+	}
+	subject := strings.TrimSpace(agentIdentity)
+	if subject == "" {
+		subject = sessionID
+	}
+	rec.Record(events.Event{
+		Type:    events.SessionQuarantined,
+		Actor:   "gc",
+		Subject: subject,
+		Message: reason,
+	})
 }
 
 // markProviderTerminalError records the terminal-provider-error health/sleep
@@ -639,7 +664,7 @@ func sessionHasProviderTerminalErrorInfo(info sessionpkg.Info) bool {
 // that write (ApplyPatchInfo folds only on success), so the returned Info matches
 // what the raw bead carries. agentIdentity is the start-path-joinable agent label
 // for gc.agent.quarantines.total.
-func recordWakeFailure(info sessionpkg.Info, sessFront *sessionpkg.Store, clk clock.Clock, agentIdentity string) sessionpkg.Info {
+func recordWakeFailure(info sessionpkg.Info, sessFront *sessionpkg.Store, clk clock.Clock, agentIdentity string, rec events.Recorder) sessionpkg.Info {
 	// Parse the raw wake_attempts mirror (not the pre-parsed info.WakeAttempts,
 	// which zeroes on strconv.ErrRange) so an out-of-range counter yields the
 	// same clamped value the old strconv.Atoi(session.Metadata[...]) path did —
@@ -663,10 +688,13 @@ func recordWakeFailure(info sessionpkg.Info, sessFront *sessionpkg.Store, clk cl
 		_ = sessFront.ApplyPatch(info.ID, reset)
 		info = info.ApplyPatch(reset)
 	}
-	accrual := sessionpkg.WakeFailureAccrualPatch(attempts, defaultMaxWakeAttempts, clk.Now().Add(defaultQuarantineDuration))
+	quarantineUntil := clk.Now().Add(defaultQuarantineDuration)
+	accrual := sessionpkg.WakeFailureAccrualPatch(attempts, defaultMaxWakeAttempts, quarantineUntil)
 	if accrual.Quarantined {
 		if next, err := sessFront.ApplyPatchInfo(info, accrual.Patch); err == nil {
 			telemetry.RecordAgentQuarantine(context.Background(), agentIdentity)
+			recordSessionQuarantinedEvent(rec, agentIdentity, info.ID,
+				fmt.Sprintf("wake-failure threshold exceeded (%d attempts); quarantined until %s", defaultMaxWakeAttempts, quarantineUntil.UTC().Format(time.RFC3339)))
 			info = next
 		}
 	} else {
@@ -711,10 +739,10 @@ func clearWakeFailures(info sessionpkg.Info, sessFront *sessionpkg.Store) sessio
 // advanced by every write on either exit path (front-door migration Step 6d,
 // write-returns-Info, STEP6-PREPASS-AUDIT group 5). The default (rapid-crash)
 // path writes nothing and returns the input Info unchanged.
-func checkChurn(info sessionpkg.Info, cfg *config.City, alive bool, dt *drainTracker, sessFront *sessionpkg.Store, clk clock.Clock) (sessionpkg.Info, bool) {
+func checkChurn(info sessionpkg.Info, cfg *config.City, alive bool, dt *drainTracker, sessFront *sessionpkg.Store, clk clock.Clock, rec events.Recorder) (sessionpkg.Info, bool) {
 	switch sessionpkg.DecideSessionExit(sessionExitFactsInfo(info, cfg, alive, dt, clk)) {
 	case sessionpkg.ExitChurn:
-		info = recordChurn(info, sessFront, clk, sessionAgentMetricIdentityInfo(info, cfg))
+		info = recordChurn(info, sessFront, clk, sessionAgentMetricIdentityInfo(info, cfg), rec)
 		// Clear last_woke_at so this death is not re-counted next tick
 		// (edge-triggered, same pattern as checkStability).
 		info = clearLastWokeAt(info, sessFront)
@@ -746,7 +774,7 @@ func isDeliberateSleepReason(reason string) bool {
 //   - {"churn_count": next} on the non-quarantine path
 //
 // agentIdentity is the start-path-joinable agent label for gc.agent.quarantines.total.
-func recordChurn(info sessionpkg.Info, sessFront *sessionpkg.Store, clk clock.Clock, agentIdentity string) sessionpkg.Info {
+func recordChurn(info sessionpkg.Info, sessFront *sessionpkg.Store, clk clock.Clock, agentIdentity string, rec events.Recorder) sessionpkg.Info {
 	count, _ := strconv.Atoi(info.ChurnCount)
 
 	// Always clear session_key on churn — context exhaustion means the
@@ -759,10 +787,13 @@ func recordChurn(info sessionpkg.Info, sessFront *sessionpkg.Store, clk clock.Cl
 		info = info.ApplyPatch(reset)
 	}
 
-	accrual := sessionpkg.ChurnAccrualPatch(count, defaultMaxChurnCycles, clk.Now().Add(defaultQuarantineDuration))
+	quarantineUntil := clk.Now().Add(defaultQuarantineDuration)
+	accrual := sessionpkg.ChurnAccrualPatch(count, defaultMaxChurnCycles, quarantineUntil)
 	if accrual.Quarantined {
 		if next, err := sessFront.ApplyPatchInfo(info, accrual.Patch); err == nil {
 			telemetry.RecordAgentQuarantine(context.Background(), agentIdentity)
+			recordSessionQuarantinedEvent(rec, agentIdentity, info.ID,
+				fmt.Sprintf("churn threshold exceeded (%d non-productive wake cycles); quarantined until %s", defaultMaxChurnCycles, quarantineUntil.UTC().Format(time.RFC3339)))
 			info = next
 		}
 		return info

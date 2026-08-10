@@ -33,7 +33,7 @@ func TestDoEventsCityDefaultUsesJSONLItems(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := doEvents(eventsAPIScope{apiURL: server.URL, cityName: "mc-city"}, "", "", nil, &stdout, &stderr)
+	code := doEvents(eventsAPIScope{apiURL: server.URL, cityName: "mc-city"}, "", "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -67,7 +67,7 @@ func TestDoEventsSupervisorDefaultUsesTaggedJSONLItems(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := doEvents(eventsAPIScope{apiURL: server.URL}, "", "", nil, &stdout, &stderr)
+	code := doEvents(eventsAPIScope{apiURL: server.URL}, "", "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -204,7 +204,7 @@ func TestDoEventsFallsBackToLocalCityEventsWhenCityStopped(t *testing.T) {
 		apiURL:   server.URL,
 		cityName: "mc-city",
 		cityPath: cityDir,
-	}, events.SessionStopped, "", nil, &stdout, &stderr)
+	}, events.SessionStopped, "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -244,7 +244,7 @@ func TestDoEventsFallsBackToLocalCityEventsOnTypedStoppedCityNotFound(t *testing
 		apiURL:   server.URL,
 		cityName: "mc-city",
 		cityPath: cityDir,
-	}, events.SessionStopped, "", nil, &stdout, &stderr)
+	}, events.SessionStopped, "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -284,7 +284,7 @@ func TestDoEventsDoesNotFallbackToLocalCityEventsForGeneric404(t *testing.T) {
 		apiURL:   server.URL,
 		cityName: "mc-city",
 		cityPath: cityDir,
-	}, events.SessionStopped, "", nil, &stdout, &stderr)
+	}, events.SessionStopped, "", nil, 0, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("doEvents = %d, want 1; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -323,7 +323,7 @@ func TestDoEventsDoesNotFallbackToLocalCityEventsForExplicitAPI(t *testing.T) {
 		cityName:    "mc-city",
 		cityPath:    cityDir,
 		explicitAPI: true,
-	}, events.SessionStopped, "", nil, &stdout, &stderr)
+	}, events.SessionStopped, "", nil, 0, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("doEvents = %d, want 1; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -363,7 +363,7 @@ func TestDoEventsFallsBackToLocalCityEventsForExplicitLocalSupervisorAPI(t *test
 		cityPath:           cityDir,
 		explicitAPI:        true,
 		localSupervisorAPI: true,
-	}, events.SessionStopped, "", nil, &stdout, &stderr)
+	}, events.SessionStopped, "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -398,7 +398,7 @@ func TestDoEventsFallsBackToLocalCityEventsForExplicitLocalSupervisorAPITranspor
 		cityPath:           cityDir,
 		explicitAPI:        true,
 		localSupervisorAPI: true,
-	}, events.SessionStopped, "", nil, &stdout, &stderr)
+	}, events.SessionStopped, "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -440,7 +440,7 @@ func TestDoEventsReadsCustomCityEventTypesThroughAPI(t *testing.T) {
 		apiURL:   server.URL,
 		cityName: "mc-city",
 		cityPath: cityDir,
-	}, "app.custom", "", nil, &stdout, &stderr)
+	}, "app.custom", "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -476,7 +476,7 @@ func TestDoEventsDoesNotReadLocalUntypedCityEventsForExplicitRemoteAPI(t *testin
 		cityName:    "mc-city",
 		cityPath:    cityDir,
 		explicitAPI: true,
-	}, "app.custom", "", nil, &stdout, &stderr)
+	}, "app.custom", "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -839,7 +839,7 @@ func TestDoEventsCityListForwardsCorrelationFields(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := doEvents(eventsAPIScope{apiURL: server.URL, cityName: "mc-city"}, "", "", nil, &stdout, &stderr)
+	code := doEvents(eventsAPIScope{apiURL: server.URL, cityName: "mc-city"}, "", "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -860,7 +860,7 @@ func TestDoEventsSupervisorListForwardsCorrelationFields(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := doEvents(eventsAPIScope{apiURL: server.URL}, "", "", nil, &stdout, &stderr)
+	code := doEvents(eventsAPIScope{apiURL: server.URL}, "", "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -940,7 +940,7 @@ func TestDoEventsLocalCityFallbackForwardsCorrelationFields(t *testing.T) {
 		apiURL:   server.URL,
 		cityName: "mc-city",
 		cityPath: cityDir,
-	}, events.SessionStopped, "", nil, &stdout, &stderr)
+	}, events.SessionStopped, "", nil, 0, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -1163,7 +1163,7 @@ func TestParsePayloadMatch(t *testing.T) {
 
 func TestCmdEventsValidatesLocalFlagsBeforeAPIDiscovery(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := cmdEvents("", "", "notaduration", nil, &stdout, &stderr)
+	code := cmdEvents("", "", "notaduration", nil, 0, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("cmdEvents invalid since = 0, want non-zero")
 	}
@@ -1531,7 +1531,7 @@ func TestFetchCityEventsSinglePageChronological(t *testing.T) {
 		t.Fatalf("client: %v", err)
 	}
 	var warn bytes.Buffer
-	got, err := fetchCityEvents(context.Background(), client, "mc-city", "", "", &warn)
+	got, err := fetchCityEvents(context.Background(), client, "mc-city", "", "", 0, &warn)
 	if err != nil {
 		t.Fatalf("fetchCityEvents: %v", err)
 	}
@@ -1619,7 +1619,7 @@ func TestFetchCityEventsPaginatesSinceWindow(t *testing.T) {
 		t.Fatalf("client: %v", err)
 	}
 	var warn bytes.Buffer
-	got, err := fetchCityEvents(context.Background(), client, "mc-city", "", "24h", &warn)
+	got, err := fetchCityEvents(context.Background(), client, "mc-city", "", "24h", 0, &warn)
 	if err != nil {
 		t.Fatalf("fetchCityEvents: %v", err)
 	}
@@ -1676,5 +1676,173 @@ func TestDoEventsWatchReplayDrainsAfterSeq(t *testing.T) {
 		if e.Seq != int64(i+101) {
 			t.Fatalf("event[%d].Seq = %d, want %d (ascending, contiguous from 101)", i, e.Seq, i+101)
 		}
+	}
+}
+
+// TestEventsLimitRejectsStreamModes pins ga-78r flag hygiene: --limit shapes
+// the list form only, so combining it with the streaming/cursor modes is a
+// loud error instead of a silently ignored flag.
+func TestEventsLimitRejectsStreamModes(t *testing.T) {
+	cases := [][]string{
+		{"--limit", "5", "--follow"},
+		{"--limit", "5", "--watch"},
+		{"--limit", "5", "--seq"},
+		{"--limit", "-1"},
+	}
+	for _, args := range cases {
+		var stdout, stderr bytes.Buffer
+		cmd := newEventsCmd(&stdout, &stderr)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("args %v: expected error, got nil (stdout=%q)", args, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "--limit") {
+			t.Fatalf("args %v: stderr = %q, want --limit guidance", args, stderr.String())
+		}
+	}
+}
+
+// TestFetchCityEventsLimitStopsPagination pins the ga-78r fetch cap: once the
+// newest fetchCap matches are collected the keyset walk stops instead of
+// draining the rest of the window page by page.
+func TestFetchCityEventsLimitStopsPagination(t *testing.T) {
+	const total = 1200 // 3 keyset pages of 500/500/200
+	allDesc := make([]cliWireEvent, 0, total)
+	for seq := total; seq >= 1; seq-- {
+		allDesc = append(allDesc, cliWireEvent{
+			Actor: "gc", Seq: int64(seq), Type: "e.t",
+			Ts: time.Unix(1700000000+int64(seq), 0).UTC(),
+		})
+	}
+	var requests int
+	paged := pagedCityEventsHandler(t, allDesc, 500)
+	server := newEventsTestServer(t, testEventRoutes{
+		cityEvents: func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			paged(w, r)
+		},
+	})
+	defer server.Close()
+
+	client, err := genclient.NewClientWithResponses(server.URL)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	var warn bytes.Buffer
+	got, err := fetchCityEvents(context.Background(), client, "mc-city", "", "24h", 600, &warn)
+	if err != nil {
+		t.Fatalf("fetchCityEvents: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("server saw %d page requests, want 2 (cap 600 reached after two 500-pages)", requests)
+	}
+	// The fetch may overshoot within the final page; it must hold the newest
+	// collected span in ascending order.
+	if len(got) != 1000 {
+		t.Fatalf("got %d events, want 1000 (two pages)", len(got))
+	}
+	if got[0].Seq != 201 || got[len(got)-1].Seq != 1200 {
+		t.Fatalf("span = [%d..%d], want [201..1200] (newest pages)", got[0].Seq, got[len(got)-1].Seq)
+	}
+	if warn.Len() != 0 {
+		t.Fatalf("unexpected truncation notice when --limit was satisfied: %q", warn.String())
+	}
+}
+
+// TestFetchCityEventsLimitWithoutSincePaginates pins that an explicit --limit
+// larger than one page follows cursors even without --since — the user asked
+// for N events, not one page. The 300-event server page also exercises a page
+// size below the client's 500 request, so the cap spans three pages.
+func TestFetchCityEventsLimitWithoutSincePaginates(t *testing.T) {
+	const total = 1200
+	allDesc := make([]cliWireEvent, 0, total)
+	for seq := total; seq >= 1; seq-- {
+		allDesc = append(allDesc, cliWireEvent{
+			Actor: "gc", Seq: int64(seq), Type: "e.t",
+			Ts: time.Unix(1700000000+int64(seq), 0).UTC(),
+		})
+	}
+	server := newEventsTestServer(t, testEventRoutes{
+		cityEvents: pagedCityEventsHandler(t, allDesc, 300),
+	})
+	defer server.Close()
+
+	client, err := genclient.NewClientWithResponses(server.URL)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	var warn bytes.Buffer
+	got, err := fetchCityEvents(context.Background(), client, "mc-city", "", "", 700, &warn)
+	if err != nil {
+		t.Fatalf("fetchCityEvents: %v", err)
+	}
+	if len(got) < 700 {
+		t.Fatalf("got %d events, want >= 700 (cursor followed to satisfy the cap)", len(got))
+	}
+	if warn.Len() != 0 {
+		t.Fatalf("unexpected truncation notice when the cap drove pagination: %q", warn.String())
+	}
+}
+
+// TestDoEventsLimitReturnsNewest pins the end-to-end --limit contract: the
+// list form returns exactly the newest N matching events, ascending.
+func TestDoEventsLimitReturnsNewest(t *testing.T) {
+	items := []cliWireEvent{
+		{Actor: "gc", Seq: 9, Type: "e.t", Ts: time.Unix(1700000090, 0).UTC()},
+		{Actor: "gc", Seq: 8, Type: "e.t", Ts: time.Unix(1700000080, 0).UTC()},
+		{Actor: "gc", Seq: 7, Type: "e.t", Ts: time.Unix(1700000070, 0).UTC()},
+	}
+	server := newEventsTestServer(t, testEventRoutes{
+		cityEvents: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-GC-Index", "9")
+			writeJSONResponse(t, w, cityEventsListResponse(t, items))
+		},
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := doEvents(eventsAPIScope{apiURL: server.URL, cityName: "mc-city"}, "", "", nil, 2, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2; output=%q", len(lines), stdout.String())
+	}
+	var first, second cliWireEvent
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if first.Seq != 8 || second.Seq != 9 {
+		t.Fatalf("seqs = %d,%d; want 8,9 (newest two, ascending)", first.Seq, second.Seq)
+	}
+}
+
+// TestDoEventsSupervisorLimitPassesThrough pins that the supervisor list
+// receives the --limit server-side so the head fetch stays cheap.
+func TestDoEventsSupervisorLimitPassesThrough(t *testing.T) {
+	var gotLimit string
+	items := []cliWireTaggedEvent{
+		{Actor: "gc", City: "alpha", Seq: 4, Type: "e.t", Ts: time.Unix(1700000040, 0).UTC()},
+		{Actor: "gc", City: "alpha", Seq: 5, Type: "e.t", Ts: time.Unix(1700000050, 0).UTC()},
+	}
+	server := newEventsTestServer(t, testEventRoutes{
+		supervisorEvents: func(w http.ResponseWriter, r *http.Request) {
+			gotLimit = r.URL.Query().Get("limit")
+			writeJSONResponse(t, w, supervisorEventsListResponse(t, items))
+		},
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := doEvents(eventsAPIScope{apiURL: server.URL}, "", "", nil, 2, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doEvents = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if gotLimit != "2" {
+		t.Fatalf("supervisor request limit = %q, want 2", gotLimit)
 	}
 }

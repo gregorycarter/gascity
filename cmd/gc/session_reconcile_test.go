@@ -1311,7 +1311,7 @@ func TestCheckStability_AliveReturnsFalse(t *testing.T) {
 		"last_woke_at": clk.Now().Add(-10 * time.Second).Format(time.RFC3339),
 	})
 
-	if _, stab := checkStability(seedSessionInfo(session), nil, true, dt, sessionFrontDoor(store), clk, nil); stab {
+	if _, stab := checkStability(seedSessionInfo(session), nil, true, dt, sessionFrontDoor(store), clk, nil, nil); stab {
 		t.Error("alive session should not report stability failure")
 	}
 }
@@ -1327,7 +1327,7 @@ func TestCheckStability_RapidExit(t *testing.T) {
 		"wake_attempts": "0",
 	})
 
-	_, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil)
+	_, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil, nil)
 	syncBeadFromStore(&session, store)
 	if !stab {
 		t.Error("rapid exit should report stability failure")
@@ -1355,7 +1355,7 @@ func TestCheckStability_PendingCreateInFlightNotCounted(t *testing.T) {
 		"wake_attempts":        "0",
 	})
 
-	_, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil)
+	_, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil, nil)
 	syncBeadFromStore(&session, store)
 	if stab {
 		t.Fatal("in-flight pending create should not be counted as a rapid exit")
@@ -1379,7 +1379,7 @@ func TestCheckStability_PendingCreateClaimNotCountedAfterStartupLeaseExpires(t *
 		"wake_attempts":        "0",
 	})
 
-	_, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil)
+	_, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil, nil)
 	syncBeadFromStore(&session, store)
 	if stab {
 		t.Fatal("pending_create_claim should suppress stability counting until create recovery clears the claim")
@@ -1400,7 +1400,7 @@ func TestCheckStability_DrainingNotCounted(t *testing.T) {
 		"last_woke_at": now.Add(-10 * time.Second).Format(time.RFC3339),
 	})
 
-	if _, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil); stab {
+	if _, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil, nil); stab {
 		t.Error("draining session death should not count as stability failure")
 	}
 }
@@ -1416,7 +1416,7 @@ func TestCheckStability_StableSession(t *testing.T) {
 		"last_woke_at": now.Add(-2 * time.Minute).Format(time.RFC3339),
 	})
 
-	if _, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil); stab {
+	if _, stab := checkStability(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil, nil); stab {
 		t.Error("session that lived past threshold should not be stability failure")
 	}
 }
@@ -1435,7 +1435,7 @@ func TestCheckStability_SubprocessProviderSkipsCrashCounting(t *testing.T) {
 		"wake_attempts": "0",
 	})
 
-	_, stab := checkStability(seedSessionInfo(session), cfg, false, dt, sessionFrontDoor(store), clk, nil)
+	_, stab := checkStability(seedSessionInfo(session), cfg, false, dt, sessionFrontDoor(store), clk, nil, nil)
 	syncBeadFromStore(&session, store)
 	if stab {
 		t.Fatal("subprocess rapid exit should not be counted as a crash")
@@ -1457,7 +1457,7 @@ func TestRecordWakeFailure_Quarantine(t *testing.T) {
 		"wake_attempts": "4", // one below threshold
 	})
 
-	recordWakeFailure(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil))
+	recordWakeFailure(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil), nil)
 	syncBeadFromStore(&session, store)
 
 	if session.Metadata["wake_attempts"] != "5" {
@@ -1480,7 +1480,7 @@ func TestRecordWakeFailure_BelowThreshold(t *testing.T) {
 		"wake_attempts": "1",
 	})
 
-	recordWakeFailure(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil))
+	recordWakeFailure(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil), nil)
 	syncBeadFromStore(&session, store)
 
 	if session.Metadata["wake_attempts"] != "2" {
@@ -1501,7 +1501,7 @@ func TestRecordWakeFailure_ClearsStartedConfigHash(t *testing.T) {
 		"started_config_hash": "abc123",
 	})
 
-	recordWakeFailure(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil))
+	recordWakeFailure(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil), nil)
 	syncBeadFromStore(&session, store)
 
 	if session.Metadata["session_key"] != "" {
@@ -1521,7 +1521,7 @@ func TestRecordWakeFailure_ClearsStartedConfigHashWhenSessionKeyAlreadyEmpty(t *
 		"started_config_hash": "abc123",
 	})
 
-	recordWakeFailure(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil))
+	recordWakeFailure(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil), nil)
 	syncBeadFromStore(&session, store)
 
 	if session.Metadata["started_config_hash"] != "" {
@@ -2420,7 +2420,7 @@ func TestCheckStability_RapidExitAfterHealStateKeepsStartedConfigHashCleared(t *
 	if session.Metadata["started_config_hash"] != "" {
 		t.Fatalf("healState started_config_hash = %q, want empty", session.Metadata["started_config_hash"])
 	}
-	_, stab := checkStability(seedSessionInfo(session), nil, false, nil, sessionFrontDoor(store), clk, nil)
+	_, stab := checkStability(seedSessionInfo(session), nil, false, nil, sessionFrontDoor(store), clk, nil, nil)
 	syncBeadFromStore(&session, store)
 	if !stab {
 		t.Fatal("checkStability should record the rapid exit")
@@ -2702,7 +2702,7 @@ func TestCheckChurn_AliveReturnsFalse(t *testing.T) {
 		"last_woke_at": now.Add(-90 * time.Second).Format(time.RFC3339),
 	})
 
-	if _, churn := checkChurn(seedSessionInfo(session), nil, true, dt, sessionFrontDoor(store), clk); churn {
+	if _, churn := checkChurn(seedSessionInfo(session), nil, true, dt, sessionFrontDoor(store), clk, nil); churn {
 		t.Error("alive session should not trigger churn")
 	}
 }
@@ -2720,7 +2720,7 @@ func TestCheckChurn_NonProductiveDeath(t *testing.T) {
 		"churn_count":  "0",
 	})
 
-	_, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk)
+	_, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil)
 	syncBeadFromStore(&session, store)
 	if !churn {
 		t.Error("non-productive death should trigger churn")
@@ -2745,7 +2745,7 @@ func TestCheckChurn_RapidExitIgnored(t *testing.T) {
 		"last_woke_at": now.Add(-10 * time.Second).Format(time.RFC3339),
 	})
 
-	if _, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk); churn {
+	if _, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil); churn {
 		t.Error("rapid exit should not trigger churn (handled by checkStability)")
 	}
 }
@@ -2761,7 +2761,7 @@ func TestCheckChurn_PendingCreateClaimNotCountedAfterStartupLeaseExpires(t *test
 		"churn_count":          "0",
 	})
 
-	_, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk)
+	_, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil)
 	syncBeadFromStore(&session, store)
 	if churn {
 		t.Fatal("pending_create_claim should suppress churn counting until create recovery clears the claim")
@@ -2782,7 +2782,7 @@ func TestCheckChurn_ProductiveSessionIgnored(t *testing.T) {
 		"last_woke_at": now.Add(-10 * time.Minute).Format(time.RFC3339),
 	})
 
-	if _, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk); churn {
+	if _, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil); churn {
 		t.Error("productive session death should not trigger churn")
 	}
 }
@@ -2801,7 +2801,7 @@ func TestCheckChurn_DeadProductiveSessionClearsChurnCount(t *testing.T) {
 		"churn_count":  "2",
 	})
 
-	_, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk)
+	_, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil)
 	syncBeadFromStore(&session, store)
 	if churn {
 		t.Error("dead productive session should not trigger churn")
@@ -2825,7 +2825,7 @@ func TestCheckChurn_ClearedLastWokeAtSkipsChurn(t *testing.T) {
 		"churn_count":  "2",
 	})
 
-	_, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk)
+	_, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil)
 	syncBeadFromStore(&session, store)
 	if churn {
 		t.Error("session with cleared last_woke_at should not trigger churn")
@@ -2846,7 +2846,7 @@ func TestCheckChurn_DrainingNotCounted(t *testing.T) {
 		"last_woke_at": now.Add(-90 * time.Second).Format(time.RFC3339),
 	})
 
-	if _, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk); churn {
+	if _, churn := checkChurn(seedSessionInfo(session), nil, false, dt, sessionFrontDoor(store), clk, nil); churn {
 		t.Error("draining session death should not count as churn")
 	}
 }
@@ -2864,7 +2864,7 @@ func TestCheckChurn_SubprocessProviderSkipped(t *testing.T) {
 		"last_woke_at": now.Add(-90 * time.Second).Format(time.RFC3339),
 	})
 
-	if _, churn := checkChurn(seedSessionInfo(session), cfg, false, dt, sessionFrontDoor(store), clk); churn {
+	if _, churn := checkChurn(seedSessionInfo(session), cfg, false, dt, sessionFrontDoor(store), clk, nil); churn {
 		t.Error("subprocess sessions should not trigger churn")
 	}
 }
@@ -2883,7 +2883,7 @@ func TestCheckChurn_CityStopSleepReasonSkipped(t *testing.T) {
 		"continuation_reset_pending": "",
 	})
 
-	_, churn := checkChurn(seedSessionInfo(session), &config.City{}, false, dt, sessionFrontDoor(store), clk)
+	_, churn := checkChurn(seedSessionInfo(session), &config.City{}, false, dt, sessionFrontDoor(store), clk, nil)
 	syncBeadFromStore(&session, store)
 	if churn {
 		t.Fatal("city-stop sessions should not trigger churn")
@@ -2911,7 +2911,7 @@ func TestRecordChurn_Quarantine(t *testing.T) {
 		"churn_count": "2", // one below threshold (defaultMaxChurnCycles=3)
 	})
 
-	recordChurn(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil))
+	recordChurn(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil), nil)
 	syncBeadFromStore(&session, store)
 
 	if session.Metadata["churn_count"] != "3" {
@@ -2934,7 +2934,7 @@ func TestRecordChurn_BelowThreshold(t *testing.T) {
 		"churn_count": "0",
 	})
 
-	recordChurn(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil))
+	recordChurn(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil), nil)
 	syncBeadFromStore(&session, store)
 
 	if session.Metadata["churn_count"] != "1" {
@@ -2955,7 +2955,7 @@ func TestRecordChurn_ClearsSessionKey(t *testing.T) {
 		"session_key": "old-key-123",
 	})
 
-	recordChurn(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil))
+	recordChurn(seedSessionInfo(session), sessionFrontDoor(store), clk, sessionAgentMetricIdentity(session, nil), nil)
 	syncBeadFromStore(&session, store)
 
 	if session.Metadata["session_key"] != "" {

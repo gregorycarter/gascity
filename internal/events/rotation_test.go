@@ -82,6 +82,17 @@ func TestGzipAndArchiveCollisionGuard(t *testing.T) {
 	}
 }
 
+// backdatePastSweepAge marks a fixture rotation artifact old enough for the
+// orphan sweep to treat it as crashed rather than in-flight (ga-78r: fresh
+// rotating/tmp files belong to a rotation another live recorder still owns).
+func backdatePastSweepAge(t *testing.T, path string) {
+	t.Helper()
+	old := time.Now().Add(-2 * orphanSweepMinAge)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReapOrphanedRotatingFilesGzipsRotating(t *testing.T) {
 	dir := t.TempDir()
 
@@ -93,11 +104,13 @@ func TestReapOrphanedRotatingFilesGzipsRotating(t *testing.T) {
 	if err := os.WriteFile(rotating, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	backdatePastSweepAge(t, rotating)
 
 	tmpOrphan := filepath.Join(dir, "events.jsonl.archive-20260101T000000Z-seq-1-2.gz.tmp")
 	if err := os.WriteFile(tmpOrphan, []byte("incomplete"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	backdatePastSweepAge(t, tmpOrphan)
 
 	var stderr bytes.Buffer
 	if err := reapOrphanedRotatingFiles(dir, &stderr); err != nil {
@@ -165,6 +178,7 @@ func TestReapOrphanedRotatingFilesEmptyRotatingFile(t *testing.T) {
 	if err := os.WriteFile(rotating, []byte{}, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	backdatePastSweepAge(t, rotating)
 
 	var stderr bytes.Buffer
 	if err := reapOrphanedRotatingFiles(dir, &stderr); err != nil {
@@ -437,4 +451,32 @@ func readActiveOnly(path string) ([]Event, error) {
 		out = append(out, e)
 	}
 	return out, dec.Err()
+}
+
+// TestReapOrphanedRotatingFilesLeavesFreshFilesAlone pins the ga-78r in-flight
+// guard: rotating-* and *.gz.tmp files younger than orphanSweepMinAge belong
+// to a rotation another live recorder is still compressing, and a concurrent
+// open (short-lived per-operation writers open the same log) must not delete
+// the tmp mid-write or double-gzip the rotating segment.
+func TestReapOrphanedRotatingFilesLeavesFreshFilesAlone(t *testing.T) {
+	dir := t.TempDir()
+	rotating := filepath.Join(dir, "events.jsonl.rotating-20260507T120000Z")
+	if err := os.WriteFile(rotating, []byte(`{"seq":1,"type":"x"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tmpInFlight := filepath.Join(dir, "events.jsonl.archive-20260101T000000Z-seq-1-2.gz.tmp")
+	if err := os.WriteFile(tmpInFlight, []byte("in flight"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	if err := reapOrphanedRotatingFiles(dir, &stderr); err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if _, err := os.Stat(rotating); err != nil {
+		t.Errorf("fresh rotating file must be left alone: %v", err)
+	}
+	if _, err := os.Stat(tmpInFlight); err != nil {
+		t.Errorf("fresh .gz.tmp must be left alone: %v", err)
+	}
 }

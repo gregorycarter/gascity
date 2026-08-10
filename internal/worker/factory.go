@@ -107,6 +107,12 @@ func (f *Factory) UsageSink() usage.Sink {
 	return f.usageSink
 }
 
+// Recorder returns the events recorder the factory threads into every handle it
+// constructs. Nil when operation-event recording is disabled.
+func (f *Factory) Recorder() events.Recorder {
+	return f.recorder
+}
+
 // Session returns a worker-owned session handle backed by the factory's
 // session manager and transcript search paths.
 func (f *Factory) Session(spec SessionSpec) (*SessionHandle, error) {
