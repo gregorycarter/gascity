@@ -159,12 +159,18 @@ resolution and predicates: `bdReadyPoolDemandShell(limitFlag)` reads the
 canonical `gc.routed_to=<target>` route with `--include-ephemeral`, and
 the temporary migration predicate reads `gc.run_target=<target>` only on
 `gc.kind=workflow` roots that predate root `gc.routed_to` stamping. The
-work-query form appends `--sort oldest --limit=1` to the canonical probe
-and prints the first match, then filters the migration probe to roots with
+work-query form appends `--limit=20` to the canonical probe and serves the
+reader's default ranking, then filters the migration probe to roots with
 empty `gc.routed_to`. That is an intentional routed-queue policy:
-unassigned routed pool work is FIFO before priority, so newer
-high-priority work does not jump ahead of older ready work already queued
-for the same target. The count form unions canonical and migration
+unassigned routed pool work is claimed in the canonical ready order
+(priority, then created_at, then id — `bd ready`'s default sort and `gc
+ready`'s canonical order), so a P0 is claimed ahead of older lower-priority
+work while FIFO fairness still applies within a priority band. The claim
+layer (`gc hook --claim`) re-imposes the same canonical order on the
+candidate batch, so no reader ordering can starve a higher-priority bead
+that is present in the batch (ga-1jp: an earlier `--sort oldest` probe let
+a P2 be claimed over a ready P0 during a production main-red incident).
+The count form unions canonical and migration
 probes and deduplicates by bead ID before piping through `jq 'length'`.
 Targets resolve to `Agent.PoolName` when set and
 `Agent.QualifiedName()` otherwise, so pool instances and pool templates
@@ -259,8 +265,9 @@ regressions.
     `bdReadyPoolDemandShell` helper in `internal/config/config.go`. The
     worker and reconciler must also share the temporary migration predicate
     for `gc.run_target=<target>` on `gc.kind=workflow` roots with empty
-    `gc.routed_to`; only the worker's first-row form adds native
-    `bd ready --sort oldest --limit=1` selection to the canonical probe.
+    `gc.routed_to`; only the worker's first-row form adds a native
+    `bd ready --limit=20` bounded selection (the reader's default
+    priority-first canonical order) to the canonical probe.
     Any pool-demand predicate change to one (added filter, modified target
     resolution, new state) MUST be reflected in the other. Diverging the two
     re-introduces the protocol-mismatch class — the reconciler
@@ -372,8 +379,9 @@ name = "coder"
 pool = { min = 1, max = 3, check = "echo 2" }
 # Default sling_query: bd update {} --set-metadata gc.routed_to=coder
 # Default work_query: bd ready --include-ephemeral --metadata-field gc.routed_to=coder
-#   --unassigned --exclude-type=epic --json --sort oldest --limit=1,
-#   then a temporary gc.run_target workflow-root migration fallback
+#   --unassigned --exclude-type=epic --json --limit=20 (default priority-first
+#   canonical order), then a temporary gc.run_target workflow-root migration
+#   fallback
 ```
 
 System formulas are embedded in the `gc` binary and materialized to

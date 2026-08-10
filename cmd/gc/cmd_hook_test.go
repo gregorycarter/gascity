@@ -2865,12 +2865,14 @@ func TestDoHookNormalizesSingleObjectOutputToArray(t *testing.T) {
 func TestDoHookClaimSkipsUnclaimableCandidateError(t *testing.T) {
 	// A candidate whose claim errors (e.g. a routed id that no longer resolves
 	// in the store this context can reach) must not wedge the whole hook: log
-	// the error, skip it, and claim the next eligible candidate.
+	// the error, skip it, and claim the next eligible candidate. The erroring
+	// candidate is older so it heads the canonical ready order the claim layer
+	// imposes and is genuinely attempted first.
 	var attempts []string
 	runner := func(string, string) (string, error) {
 		return `[
-			{"id":"hw-unresolvable","status":"open","metadata":{"gc.routed_to":"worker"}},
-			{"id":"hw-live","status":"open","metadata":{"gc.routed_to":"worker"}}
+			{"id":"hw-unresolvable","status":"open","created_at":"2026-05-20T06:00:00Z","metadata":{"gc.routed_to":"worker"}},
+			{"id":"hw-live","status":"open","created_at":"2026-05-21T06:00:00Z","metadata":{"gc.routed_to":"worker"}}
 		]`, nil
 	}
 	ops := hookClaimOps{
