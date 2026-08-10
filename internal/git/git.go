@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Worktree represents a single git worktree entry.
@@ -438,6 +440,42 @@ func sanitizeGitEnv(environ []string) []string {
 		cleaned = append(cleaned, e)
 	}
 	return cleaned
+}
+
+// CommitCountSince returns the number of commits reachable from ref whose
+// commit time is at or after since. It reads only local refs — pair it with
+// FetchBranch when the count must reflect the remote tip. This is the
+// heal-loop throughput probe: landed commits on a mainline ref are the one
+// signal no orchestration failure mode can fake.
+func (g *Git) CommitCountSince(ctx context.Context, ref string, since time.Time) (int, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return 0, fmt.Errorf("counting commits: empty ref")
+	}
+	out, err := g.runCtx(ctx, "rev-list", "--count", "--since="+since.UTC().Format(time.RFC3339), ref)
+	if err != nil {
+		return 0, fmt.Errorf("counting commits on %q since %s: %w", ref, since.UTC().Format(time.RFC3339), err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("parsing rev-list count for %q: %w", ref, err)
+	}
+	return count, nil
+}
+
+// FetchBranch updates the origin remote-tracking ref for one branch. It
+// mutates only refs/remotes/origin/<branch> — never the worktree or index —
+// so it is safe to run against a checkout owned by someone else.
+func (g *Git) FetchBranch(ctx context.Context, branch string) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("fetching branch: empty branch")
+	}
+	if _, err := g.runCtx(ctx, "fetch", "--quiet", "origin",
+		"+refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
+		return fmt.Errorf("fetching origin/%s: %w", branch, err)
+	}
+	return nil
 }
 
 // run executes a git command in the working directory. Git environment

@@ -223,6 +223,26 @@ const (
 	StoreDiskWarn     = "gc.store.disk_warn"
 	StoreDiskCritical = "gc.store.disk_critical"
 
+	// Heal loop events. Emitted by the deterministic self-healing throughput
+	// loop (`gc heal` / the controller heal watchdog). The loop never wakes a
+	// human as a recovery mechanism, so these events ARE the audit trail:
+	// every detection and every remediation records its before/after state
+	// here.
+	// HealStallDetected fires when a target rig has landed no mainline commit
+	// within the stall window while actionable demand older than the window
+	// exists. Subject is the rig name.
+	HealStallDetected = "heal.stall_detected"
+	// HealActionTaken fires for each remediation the loop performs (or would
+	// perform in dry-run). Subject is the acted-on bead ID or session name;
+	// the payload carries the ladder rung, action kind, and before/after
+	// state.
+	HealActionTaken = "heal.action"
+	// HealActionCapped fires when a remediation was warranted but suppressed
+	// by the per-subject action cooldown or the per-pass action budget — the
+	// loud record that the loop is refusing to thrash rather than silently
+	// retrying.
+	HealActionCapped = "heal.capped"
+
 	// BackendCredentialResolved records that a credential for a storage
 	// backend was resolved for one scope. The payload names the backend,
 	// the scope and the resolution tier that supplied the value; it MUST
@@ -308,6 +328,7 @@ var KnownEventTypes = []string{
 	EventsRotated,
 	StoreMaintenanceDone, StoreMaintenanceFailed,
 	StoreDiskWarn, StoreDiskCritical,
+	HealStallDetected, HealActionTaken, HealActionCapped,
 	BackendCredentialResolved,
 	EmergencySignaled, EmergencyAcked,
 	BeadsConditionalWritesDegraded,
