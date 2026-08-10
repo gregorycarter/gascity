@@ -240,12 +240,7 @@ func TestHealLeavesQueueAddressesAndFreshAndHeldWorkAlone(t *testing.T) {
 		o.Assignee = strPtr("coordinator-address")
 	})
 
-	// A bead updated moments before the pass (fresh) must not be released:
-	// freshness is measured against pass-now, so create it with a store whose
-	// clock we shift by touching it late. MemStore stamps wall-clock time, so
-	// simulate freshness by running the pass with now = wall now for it.
-	report := runHealPass(env.deps())
-	_ = report
+	runHealPass(env.deps())
 
 	if got := env.get(t, queueOwned.ID); got.Assignee != "demo/merge-queue" {
 		t.Errorf("queue-owned bead released: assignee=%q", got.Assignee)
