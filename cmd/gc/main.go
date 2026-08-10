@@ -344,6 +344,7 @@ func newRootCmdWithOptions(stdout, stderr io.Writer, options rootCommandOptions)
 		newPackCmd(stdout, stderr),
 		newLintCmd(stdout, stderr),
 		newDoctorCmd(stdout, stderr),
+		newHealCmd(stdout, stderr),
 		newHookCmd(stdout, stderr),
 		newReadyCmd(stdout, stderr),
 		newSlingCmd(stdout, stderr),

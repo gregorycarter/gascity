@@ -134,6 +134,8 @@ type CityRuntime struct {
 	orderSweepWatchdogLast             time.Time
 	orderTrackingRetentionWatchdogLast time.Time
 	nudgeMailSweepWatchdogLast         time.Time
+	healWatchdogLast                   time.Time
+	healWatchdogInFlight               atomic.Bool
 	wispIndexMigrationApplied          bool
 
 	rec events.Recorder
@@ -1413,6 +1415,7 @@ func (cr *CityRuntime) dispatchOrders(ctx context.Context, cityRoot string) {
 	cr.runOrderTrackingSweepWatchdog(now)
 	cr.runOrderTrackingRetentionWatchdog(now)
 	cr.runNudgeMailSweepWatchdog(now)
+	cr.runHealWatchdog(now)
 	if cr.od != nil {
 		cr.od.dispatch(ctx, cityRoot, now)
 	}
