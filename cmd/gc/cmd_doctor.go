@@ -292,9 +292,7 @@ func buildDoctorChecks(cityPath string, cfg *config.City, cfgErr error, opts bui
 		// controller state — the check is inert unless agent sessions are live
 		// AND beads changed recently, and exactly that combination with a
 		// silent event log is the failure it must catch loudly.
-		if sp, err := newSessionProvider(); err == nil {
-			register(newEventsFreshnessCheck(cfg, loadedCityName(cfg, cityPath), sp, storeFactory, cityPath))
-		}
+		register(newEventsFreshnessCheck(cfg, loadedCityName(cfg, cityPath), storeFactory, cityPath))
 	}
 	register(newDoctorDoltServerCheck(cityPath, opts.SkipCityDoltCheck))
 	// Host-level fork-rate watch: surfaces the per-command data-plane fork storm

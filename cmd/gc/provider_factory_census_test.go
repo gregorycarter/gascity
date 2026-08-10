@@ -54,6 +54,7 @@ var canonicalProviderCalls = map[string]int{
 	"cmd_citystatus.go:cmdCityStatus:newStatusSessionProviderForCityWithSnapshot:bind-error":                                                   1,
 	"cmd_convoy_dispatch.go:runControlDispatcherWithStoreAndConfig:dispatchControlSessionProvider:bind-error":                                  2,
 	"cmd_doctor.go:buildDoctorChecks:newSessionProvider:bind-error":                                                                            1,
+	"cmd_doctor_events_freshness.go:newEventsFreshnessCheck:newSessionProvider:bind-error":                                                     1,
 	"cmd_handoff.go:cmdHandoff:newSessionProvider:bind-error":                                                                                  1,
 	"cmd_handoff.go:cmdHandoffRemote:newSessionProvider:bind-error":                                                                            1,
 	"cmd_nudge.go:cmdNudgePoll:newSessionProvider:bind-error":                                                                                  1,

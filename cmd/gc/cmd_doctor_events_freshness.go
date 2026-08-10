@@ -10,7 +10,6 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/doctor"
 	"github.com/gastownhall/gascity/internal/events"
-	"github.com/gastownhall/gascity/internal/runtime"
 )
 
 // eventsFreshnessWindow is how long the city event log may stay silent while
@@ -37,11 +36,18 @@ type eventsFreshnessCheck struct {
 // newEventsFreshnessCheck wires the production probes: live sessions from the
 // runtime provider over the configured agents, bead activity from the city
 // bead store's open population (session-registry beads are updated every
-// reconciler pass, so an active city always has fresh UpdatedAt stamps).
-func newEventsFreshnessCheck(cfg *config.City, cityName string, sp runtime.Provider, newStore func(string) (beads.Store, error), cityPath string) *eventsFreshnessCheck {
+// reconciler pass, so an active city always has fresh UpdatedAt stamps). The
+// session provider is constructed lazily inside the probe so building the
+// doctor check list (including `gc start`'s warm-up scan, which never runs
+// this check) costs no provider construction.
+func newEventsFreshnessCheck(cfg *config.City, cityName string, newStore func(string) (beads.Store, error), cityPath string) *eventsFreshnessCheck {
 	return &eventsFreshnessCheck{
 		now: time.Now,
 		liveSessionCount: func() (int, error) {
+			sp, err := newSessionProvider()
+			if err != nil {
+				return 0, err
+			}
 			live := 0
 			for _, a := range cfg.Agents {
 				if a.Suspended {

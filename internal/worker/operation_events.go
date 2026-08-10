@@ -205,7 +205,13 @@ func (h *SessionHandle) currentOperationSessionInfo() (sessionpkg.Info, sessionp
 	if id == "" {
 		return sessionpkg.Info{}, sessionpkg.PersistedResponse{}, false
 	}
-	info, pr, err := sessionRecordViaManager(h.manager, id)
+	// Persisted identity only — deliberately NOT sessionRecordViaManager,
+	// whose EnrichInfo runtime overlay probes the provider. Telemetry
+	// population must never touch the runtime: an IsRunning per recorded
+	// operation adds a provider round-trip (a tmux subprocess in
+	// production) to every lifecycle op and perturbs call-order-sensitive
+	// callers. Every field the payload consumes is persisted.
+	info, pr, err := h.manager.PersistedStore().GetPersistedResponse(id)
 	if err != nil {
 		return sessionpkg.Info{}, sessionpkg.PersistedResponse{}, false
 	}
