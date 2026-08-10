@@ -49,6 +49,7 @@ gc [flags]
 | [gc github](#gc-github) | GitHub integration commands |
 | [gc graph](#gc-graph) | Show dependency graph for beads |
 | [gc handoff](#gc-handoff) | Send handoff mail and restart controller-managed sessions |
+| [gc heal](#gc-heal) | Run one self-healing throughput pass |
 | [gc help](#gc-help) | Help about any command |
 | [gc hook](#gc-hook) | Find routed work for an agent |
 | [gc import](#gc-import) | Manage pack imports |
@@ -1923,6 +1924,32 @@ gc handoff [subject] [message] [flags]
 | `--hook-format` | string |  | format hook output for a provider |
 | `--json` | bool |  | emit JSON summary |
 | `--target` | string |  | Remote session alias or ID to handoff (kills only controller-restartable sessions) |
+
+## gc heal
+
+Run one deterministic self-healing pass over the city's [heal] targets.
+
+The pass measures landed commits on each target rig's mainline directly from
+git, detects a stall (nothing landing while aged demand waits), and walks the
+remediation ladder: release orphaned routed work, force-assign inverted
+priorities, recover work held by dead or stuck sessions, file mainline-red
+repair work, and restart critical sessions. Every detection and action is
+recorded on the event bus (heal.stall_detected / heal.action / heal.capped);
+per-subject cooldowns and a per-pass budget prevent thrash.
+
+The controller runs this pass automatically when [heal] sets enabled = true.
+Running "gc heal" directly performs one pass regardless of the enabled flag,
+so an external scheduler (cron, launchd) can drive recovery even when the
+controller itself is down.
+
+```
+gc heal [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--dry-run` | bool |  | report what the pass would do without mutating anything |
+| `--json` | bool |  | JSON output |
 
 ## gc help
 

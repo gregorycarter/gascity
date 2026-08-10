@@ -859,7 +859,7 @@ export type EventEmitRequest = {
     type: string;
 };
 
-export type EventPayload = AdapterEventPayload | BackendCredentialResolvedPayload | BeadClaimRejectedPayload | BeadDeadAssigneeReopenedPayload | BeadEventPayload | BeadWorktreeReapSkippedPayload | BeadWorktreeReapedPayload | BoundEventPayload | CityCreateSucceededPayload | CityLifecyclePayload | CityUnregisterSucceededPayload | ConditionalWritesDegradedPayload | GroupCreatedEventPayload | InboundEventPayload | MailEventPayload | MoleculeResolvedPayload | NoPayload | OutboundChannelMismatchPayload | OutboundEventPayload | ProjectIdentityStampedPayload | Record | RequestFailedPayload | RigCreateSucceededPayload | RigProvisionProgressPayload | RotatedPayload | SessionCreateSucceededPayload | SessionDrainAckedWithAssignedWorkPayload | SessionLifecyclePayload | SessionMessageSucceededPayload | SessionResetStalledPayload | SessionStrandedPayload | SessionSubmitSucceededPayload | SessionUnknownStatePayload | StorageBindingOutcomePayload | StoreDiskCriticalPayload | StoreDiskWarnPayload | StoreMaintenanceDonePayload | StoreMaintenanceFailedPayload | SupervisorFsPressureSkippedTickPayload | SupervisorRequestPayload | SupervisorShutdownPayload | SupervisorStartedPayload | UnboundEventPayload | WebhookReceivedPayload | WebhookRejectedPayload | WorkerOperationEventPayload;
+export type EventPayload = AdapterEventPayload | BackendCredentialResolvedPayload | BeadClaimRejectedPayload | BeadDeadAssigneeReopenedPayload | BeadEventPayload | BeadWorktreeReapSkippedPayload | BeadWorktreeReapedPayload | BoundEventPayload | CityCreateSucceededPayload | CityLifecyclePayload | CityUnregisterSucceededPayload | ConditionalWritesDegradedPayload | GroupCreatedEventPayload | HealActionCappedPayload | HealActionPayload | HealStallDetectedPayload | InboundEventPayload | MailEventPayload | MoleculeResolvedPayload | NoPayload | OutboundChannelMismatchPayload | OutboundEventPayload | ProjectIdentityStampedPayload | Record | RequestFailedPayload | RigCreateSucceededPayload | RigProvisionProgressPayload | RotatedPayload | SessionCreateSucceededPayload | SessionDrainAckedWithAssignedWorkPayload | SessionLifecyclePayload | SessionMessageSucceededPayload | SessionResetStalledPayload | SessionStrandedPayload | SessionSubmitSucceededPayload | SessionUnknownStatePayload | StorageBindingOutcomePayload | StoreDiskCriticalPayload | StoreDiskWarnPayload | StoreMaintenanceDonePayload | StoreMaintenanceFailedPayload | SupervisorFsPressureSkippedTickPayload | SupervisorRequestPayload | SupervisorShutdownPayload | SupervisorStartedPayload | UnboundEventPayload | WebhookReceivedPayload | WebhookRejectedPayload | WorkerOperationEventPayload;
 
 export type EventRotateAnchor = {
     /**
@@ -1344,6 +1344,30 @@ export type GroupRouteDecision = {
     Match: string;
     TargetSessionID: string;
     UpdateCursor: boolean;
+};
+
+export type HealActionCappedPayload = {
+    kind: string;
+    reason: string;
+    rig?: string;
+    rung: number;
+};
+
+export type HealActionPayload = {
+    after?: string;
+    before?: string;
+    dry_run?: boolean;
+    kind: string;
+    rig?: string;
+    rung: number;
+};
+
+export type HealStallDetectedPayload = {
+    branch: string;
+    landed_commits: number;
+    oldest_demand_age_s: number;
+    rig: string;
+    window_s: number;
 };
 
 export type HealthOutputBody = {
@@ -5197,6 +5221,12 @@ export type TypedEventStreamEnvelope = ({
 } & TypedEventStreamEnvelopeGcStoreMaintenanceDone) | ({
     type: 'gc.store.maintenance.failed';
 } & TypedEventStreamEnvelopeGcStoreMaintenanceFailed) | ({
+    type: 'heal.action';
+} & TypedEventStreamEnvelopeHealAction) | ({
+    type: 'heal.capped';
+} & TypedEventStreamEnvelopeHealCapped) | ({
+    type: 'heal.stall_detected';
+} & TypedEventStreamEnvelopeHealStallDetected) | ({
     type: 'mail.archived';
 } & TypedEventStreamEnvelopeMailArchived) | ({
     type: 'mail.deleted';
@@ -5977,6 +6007,60 @@ export type TypedEventStreamEnvelopeGcStoreMaintenanceFailed = {
     subject?: string;
     ts: string;
     type: 'gc.store.maintenance.failed';
+    workflow?: WorkflowEventProjection;
+};
+
+/**
+ * TypedEventStreamEnvelope heal.action
+ */
+export type TypedEventStreamEnvelopeHealAction = {
+    actor: string;
+    depends_on_step_ids?: Array<string>;
+    message?: string;
+    payload: HealActionPayload;
+    run_id?: string;
+    seq: number;
+    session_id?: string;
+    step_id?: string;
+    subject?: string;
+    ts: string;
+    type: 'heal.action';
+    workflow?: WorkflowEventProjection;
+};
+
+/**
+ * TypedEventStreamEnvelope heal.capped
+ */
+export type TypedEventStreamEnvelopeHealCapped = {
+    actor: string;
+    depends_on_step_ids?: Array<string>;
+    message?: string;
+    payload: HealActionCappedPayload;
+    run_id?: string;
+    seq: number;
+    session_id?: string;
+    step_id?: string;
+    subject?: string;
+    ts: string;
+    type: 'heal.capped';
+    workflow?: WorkflowEventProjection;
+};
+
+/**
+ * TypedEventStreamEnvelope heal.stall_detected
+ */
+export type TypedEventStreamEnvelopeHealStallDetected = {
+    actor: string;
+    depends_on_step_ids?: Array<string>;
+    message?: string;
+    payload: HealStallDetectedPayload;
+    run_id?: string;
+    seq: number;
+    session_id?: string;
+    step_id?: string;
+    subject?: string;
+    ts: string;
+    type: 'heal.stall_detected';
     workflow?: WorkflowEventProjection;
 };
 
@@ -6924,6 +7008,12 @@ export type TypedTaggedEventStreamEnvelope = ({
 } & TypedTaggedEventStreamEnvelopeGcStoreMaintenanceDone) | ({
     type: 'gc.store.maintenance.failed';
 } & TypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed) | ({
+    type: 'heal.action';
+} & TypedTaggedEventStreamEnvelopeHealAction) | ({
+    type: 'heal.capped';
+} & TypedTaggedEventStreamEnvelopeHealCapped) | ({
+    type: 'heal.stall_detected';
+} & TypedTaggedEventStreamEnvelopeHealStallDetected) | ({
     type: 'mail.archived';
 } & TypedTaggedEventStreamEnvelopeMailArchived) | ({
     type: 'mail.deleted';
@@ -7742,6 +7832,63 @@ export type TypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed = {
     subject?: string;
     ts: string;
     type: 'gc.store.maintenance.failed';
+    workflow?: WorkflowEventProjection;
+};
+
+/**
+ * TypedTaggedEventStreamEnvelope heal.action
+ */
+export type TypedTaggedEventStreamEnvelopeHealAction = {
+    actor: string;
+    city: string;
+    depends_on_step_ids?: Array<string>;
+    message?: string;
+    payload: HealActionPayload;
+    run_id?: string;
+    seq: number;
+    session_id?: string;
+    step_id?: string;
+    subject?: string;
+    ts: string;
+    type: 'heal.action';
+    workflow?: WorkflowEventProjection;
+};
+
+/**
+ * TypedTaggedEventStreamEnvelope heal.capped
+ */
+export type TypedTaggedEventStreamEnvelopeHealCapped = {
+    actor: string;
+    city: string;
+    depends_on_step_ids?: Array<string>;
+    message?: string;
+    payload: HealActionCappedPayload;
+    run_id?: string;
+    seq: number;
+    session_id?: string;
+    step_id?: string;
+    subject?: string;
+    ts: string;
+    type: 'heal.capped';
+    workflow?: WorkflowEventProjection;
+};
+
+/**
+ * TypedTaggedEventStreamEnvelope heal.stall_detected
+ */
+export type TypedTaggedEventStreamEnvelopeHealStallDetected = {
+    actor: string;
+    city: string;
+    depends_on_step_ids?: Array<string>;
+    message?: string;
+    payload: HealStallDetectedPayload;
+    run_id?: string;
+    seq: number;
+    session_id?: string;
+    step_id?: string;
+    subject?: string;
+    ts: string;
+    type: 'heal.stall_detected';
     workflow?: WorkflowEventProjection;
 };
 

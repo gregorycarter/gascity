@@ -41,6 +41,7 @@ City is the top-level configuration for a Gas City instance.
 | `convergence` | ConvergenceConfig |  |  | Convergence configures convergence loop limits. |
 | `doctor` | DoctorConfig |  |  | Doctor configures gc doctor thresholds and policy toggles (worktree size warnings, nested-worktree auto-prune). |
 | `maintenance` | MaintenanceConfig |  |  | Maintenance configures periodic store-maintenance loops. |
+| `heal` | HealConfig |  |  | Heal configures the deterministic self-healing throughput loop (stall detection + autonomous remediation ladder). |
 | `service` | []Service |  |  | Services declares workspace-owned HTTP services mounted on the controller edge under /svc/&#123;name&#125;. |
 | `webhook` | []Webhook |  |  | Webhooks declares inbound HTTP receivers mounted on the supervisor edge under /hook/&#123;name&#125;. Composed like Services (pack concatenation + SourceDir provenance + the default-closed public pack-guard). |
 | `webhooks` | WebhookPolicyConfig |  |  | WebhookPolicy holds city-level webhook governance (the [webhooks] table, notably allow_public grants). Authored only in the root city.toml; never merged from packs or fragments so a pack cannot grant itself exposure. |
@@ -470,6 +471,36 @@ GitHubPRMonitorPatch modifies an existing GitHub PR readiness monitor by name.
 | `webhook_secret_key` | string |  |  | WebhookSecretKey overrides the stable webhook secret key. |
 | `poll_interval` | string |  |  | PollInterval overrides the optional polling cadence. |
 | `merge_queue` | string |  |  | MergeQueuePolicy overrides merge-queue signal handling. Enum: `ignore`, `observe`, `repair` |
+
+## HealConfig
+
+HealConfig declares the self-healing throughput loop ([heal] in city.toml).
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `enabled` | boolean |  |  | Enabled toggles the heal loop. Defaults to false (opt-in). The controller runs the loop as a periodic watchdog when enabled; `gc heal` runs one pass regardless (so an external scheduler can drive it even when the controller is the thing that is broken). |
+| `interval` | string |  | `5m` | Interval is the cadence between controller-driven heal passes as a duration string. Defaults to 5m. |
+| `stall_after` | string |  | `30m` | StallAfter is the throughput stall window as a duration string. A rig is stalled when no commit landed on its mainline within this window while actionable work older than the window exists. Defaults to 30m. |
+| `orphan_stale_after` | string |  | `20m` | OrphanStaleAfter is the minimum age (since last update) before an assigned-but-unclaimed routed bead is treated as orphaned and returned to the pool, and before work held by a dead session is released. Defaults to 20m. |
+| `inversion_after` | string |  | `15m` | InversionAfter is the minimum unclaimed age before a ready bead at or above InversionPriority counts as priority-inverted. Defaults to 15m. |
+| `inversion_priority` | integer |  | `0` | InversionPriority is the highest (numerically largest) priority class protected against inversion. Defaults to 0: only P0 beads are force-assigned past pool ordering. |
+| `stuck_after` | string |  | `2h` | StuckAfter is the minimum age (since last bead update) before a live session holding in_progress work is treated as stuck. Defaults to 2h. |
+| `action_cooldown` | string |  | `1h` | ActionCooldown is the per-subject re-action floor. A bead or session the loop already acted on within this window is skipped and the skip is recorded loudly (heal.capped event) instead of thrashing. Defaults to 1h. |
+| `max_actions_per_pass` | integer |  | `5` | MaxActionsPerPass caps mutating actions in a single pass, bounding the blast radius of any misdetection. Defaults to 5. |
+| `critical_sessions` | []string |  |  | CriticalSessions lists session targets (agent/session names) the loop must keep running — coordinator-style singletons whose downtime is rig downtime. A session in this list that is not running is started, subject to the action cooldown. Empty disables the rung. |
+| `target` | []HealTarget |  |  | Targets declares the rigs the loop watches ([[heal.target]]). |
+
+## HealTarget
+
+HealTarget declares one rig watched by the heal loop.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `rig` | string | **yes** |  | Rig is the rig name (must match a [[rigs]] entry). |
+| `queue_addresses` | []string |  |  | QueueAddresses lists assignees whose assigned-open beads are real scan queues (merge queues and similar): rung 1 never releases their beads back to the pool, and rung 3 never treats their holders as stuck. |
+| `main_red_check` | string |  |  | MainRedCheck is a shell command run in the rig repository that exits 0 when the mainline is green and non-zero when it is red (e.g. a `gh` query against the latest mainline check run). Empty disables the mainline-red rung for this target. |
+| `main_red_route` | string |  |  | MainRedRoute is the routed-work target (gc.routed_to value) for the repair bead the loop files when MainRedCheck reports red. Required for the repair bead to be claimable; empty disables filing. |
+| `main_red_workflow` | string |  |  | MainRedWorkflow is the formula stamped on the filed repair bead. Empty files a plain routed task. |
 
 ## Import
 

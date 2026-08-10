@@ -289,6 +289,9 @@ type City struct {
 	Doctor DoctorConfig `toml:"doctor,omitempty"`
 	// Maintenance configures periodic store-maintenance loops.
 	Maintenance MaintenanceConfig `toml:"maintenance,omitempty"`
+	// Heal configures the deterministic self-healing throughput loop
+	// (stall detection + autonomous remediation ladder).
+	Heal HealConfig `toml:"heal,omitempty"`
 	// Services declares workspace-owned HTTP services mounted on the
 	// controller edge under /svc/{name}.
 	Services []Service `toml:"service,omitempty"`
@@ -4585,6 +4588,9 @@ func Load(fs fsys.FS, path string) (*City, error) {
 		return nil, err
 	}
 	if err := ValidateGitHubPRMonitors(cfg); err != nil {
+		return nil, err
+	}
+	if err := ValidateHealConfig(cfg); err != nil {
 		return nil, err
 	}
 	if err := ValidateDoltConfig(cfg, path); err != nil {

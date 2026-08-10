@@ -2096,6 +2096,33 @@ type GroupRouteDecision struct {
 	UpdateCursor    bool   `json:"UpdateCursor"`
 }
 
+// HealActionCappedPayload defines model for HealActionCappedPayload.
+type HealActionCappedPayload struct {
+	Kind   string  `json:"kind"`
+	Reason string  `json:"reason"`
+	Rig    *string `json:"rig,omitempty"`
+	Rung   int64   `json:"rung"`
+}
+
+// HealActionPayload defines model for HealActionPayload.
+type HealActionPayload struct {
+	After  *string `json:"after,omitempty"`
+	Before *string `json:"before,omitempty"`
+	DryRun *bool   `json:"dry_run,omitempty"`
+	Kind   string  `json:"kind"`
+	Rig    *string `json:"rig,omitempty"`
+	Rung   int64   `json:"rung"`
+}
+
+// HealStallDetectedPayload defines model for HealStallDetectedPayload.
+type HealStallDetectedPayload struct {
+	Branch           string `json:"branch"`
+	LandedCommits    int64  `json:"landed_commits"`
+	OldestDemandAgeS int64  `json:"oldest_demand_age_s"`
+	Rig              string `json:"rig"`
+	WindowS          int64  `json:"window_s"`
+}
+
 // HealthOutputBody defines model for HealthOutputBody.
 type HealthOutputBody struct {
 	// City City name.
@@ -5830,6 +5857,54 @@ type TypedEventStreamEnvelopeGcStoreMaintenanceFailed struct {
 	Workflow         *WorkflowEventProjection      `json:"workflow,omitempty"`
 }
 
+// TypedEventStreamEnvelopeHealAction defines model for TypedEventStreamEnvelopeHealAction.
+type TypedEventStreamEnvelopeHealAction struct {
+	Actor            string                   `json:"actor"`
+	DependsOnStepIds *[]string                `json:"depends_on_step_ids,omitempty"`
+	Message          *string                  `json:"message,omitempty"`
+	Payload          HealActionPayload        `json:"payload"`
+	RunId            *string                  `json:"run_id,omitempty"`
+	Seq              int64                    `json:"seq"`
+	SessionId        *string                  `json:"session_id,omitempty"`
+	StepId           *string                  `json:"step_id,omitempty"`
+	Subject          *string                  `json:"subject,omitempty"`
+	Ts               time.Time                `json:"ts"`
+	Type             string                   `json:"type"`
+	Workflow         *WorkflowEventProjection `json:"workflow,omitempty"`
+}
+
+// TypedEventStreamEnvelopeHealCapped defines model for TypedEventStreamEnvelopeHealCapped.
+type TypedEventStreamEnvelopeHealCapped struct {
+	Actor            string                   `json:"actor"`
+	DependsOnStepIds *[]string                `json:"depends_on_step_ids,omitempty"`
+	Message          *string                  `json:"message,omitempty"`
+	Payload          HealActionCappedPayload  `json:"payload"`
+	RunId            *string                  `json:"run_id,omitempty"`
+	Seq              int64                    `json:"seq"`
+	SessionId        *string                  `json:"session_id,omitempty"`
+	StepId           *string                  `json:"step_id,omitempty"`
+	Subject          *string                  `json:"subject,omitempty"`
+	Ts               time.Time                `json:"ts"`
+	Type             string                   `json:"type"`
+	Workflow         *WorkflowEventProjection `json:"workflow,omitempty"`
+}
+
+// TypedEventStreamEnvelopeHealStallDetected defines model for TypedEventStreamEnvelopeHealStallDetected.
+type TypedEventStreamEnvelopeHealStallDetected struct {
+	Actor            string                   `json:"actor"`
+	DependsOnStepIds *[]string                `json:"depends_on_step_ids,omitempty"`
+	Message          *string                  `json:"message,omitempty"`
+	Payload          HealStallDetectedPayload `json:"payload"`
+	RunId            *string                  `json:"run_id,omitempty"`
+	Seq              int64                    `json:"seq"`
+	SessionId        *string                  `json:"session_id,omitempty"`
+	StepId           *string                  `json:"step_id,omitempty"`
+	Subject          *string                  `json:"subject,omitempty"`
+	Ts               time.Time                `json:"ts"`
+	Type             string                   `json:"type"`
+	Workflow         *WorkflowEventProjection `json:"workflow,omitempty"`
+}
+
 // TypedEventStreamEnvelopeMailArchived defines model for TypedEventStreamEnvelopeMailArchived.
 type TypedEventStreamEnvelopeMailArchived struct {
 	Actor            string                   `json:"actor"`
@@ -7247,6 +7322,57 @@ type TypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed struct {
 	Ts               time.Time                     `json:"ts"`
 	Type             string                        `json:"type"`
 	Workflow         *WorkflowEventProjection      `json:"workflow,omitempty"`
+}
+
+// TypedTaggedEventStreamEnvelopeHealAction defines model for TypedTaggedEventStreamEnvelopeHealAction.
+type TypedTaggedEventStreamEnvelopeHealAction struct {
+	Actor            string                   `json:"actor"`
+	City             string                   `json:"city"`
+	DependsOnStepIds *[]string                `json:"depends_on_step_ids,omitempty"`
+	Message          *string                  `json:"message,omitempty"`
+	Payload          HealActionPayload        `json:"payload"`
+	RunId            *string                  `json:"run_id,omitempty"`
+	Seq              int64                    `json:"seq"`
+	SessionId        *string                  `json:"session_id,omitempty"`
+	StepId           *string                  `json:"step_id,omitempty"`
+	Subject          *string                  `json:"subject,omitempty"`
+	Ts               time.Time                `json:"ts"`
+	Type             string                   `json:"type"`
+	Workflow         *WorkflowEventProjection `json:"workflow,omitempty"`
+}
+
+// TypedTaggedEventStreamEnvelopeHealCapped defines model for TypedTaggedEventStreamEnvelopeHealCapped.
+type TypedTaggedEventStreamEnvelopeHealCapped struct {
+	Actor            string                   `json:"actor"`
+	City             string                   `json:"city"`
+	DependsOnStepIds *[]string                `json:"depends_on_step_ids,omitempty"`
+	Message          *string                  `json:"message,omitempty"`
+	Payload          HealActionCappedPayload  `json:"payload"`
+	RunId            *string                  `json:"run_id,omitempty"`
+	Seq              int64                    `json:"seq"`
+	SessionId        *string                  `json:"session_id,omitempty"`
+	StepId           *string                  `json:"step_id,omitempty"`
+	Subject          *string                  `json:"subject,omitempty"`
+	Ts               time.Time                `json:"ts"`
+	Type             string                   `json:"type"`
+	Workflow         *WorkflowEventProjection `json:"workflow,omitempty"`
+}
+
+// TypedTaggedEventStreamEnvelopeHealStallDetected defines model for TypedTaggedEventStreamEnvelopeHealStallDetected.
+type TypedTaggedEventStreamEnvelopeHealStallDetected struct {
+	Actor            string                   `json:"actor"`
+	City             string                   `json:"city"`
+	DependsOnStepIds *[]string                `json:"depends_on_step_ids,omitempty"`
+	Message          *string                  `json:"message,omitempty"`
+	Payload          HealStallDetectedPayload `json:"payload"`
+	RunId            *string                  `json:"run_id,omitempty"`
+	Seq              int64                    `json:"seq"`
+	SessionId        *string                  `json:"session_id,omitempty"`
+	StepId           *string                  `json:"step_id,omitempty"`
+	Subject          *string                  `json:"subject,omitempty"`
+	Ts               time.Time                `json:"ts"`
+	Type             string                   `json:"type"`
+	Workflow         *WorkflowEventProjection `json:"workflow,omitempty"`
 }
 
 // TypedTaggedEventStreamEnvelopeMailArchived defines model for TypedTaggedEventStreamEnvelopeMailArchived.
@@ -9971,6 +10097,84 @@ func (t *EventPayload) FromGroupCreatedEventPayload(v GroupCreatedEventPayload) 
 
 // MergeGroupCreatedEventPayload performs a merge with any union data inside the EventPayload, using the provided GroupCreatedEventPayload
 func (t *EventPayload) MergeGroupCreatedEventPayload(v GroupCreatedEventPayload) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsHealActionCappedPayload returns the union data inside the EventPayload as a HealActionCappedPayload
+func (t EventPayload) AsHealActionCappedPayload() (HealActionCappedPayload, error) {
+	var body HealActionCappedPayload
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHealActionCappedPayload overwrites any union data inside the EventPayload as the provided HealActionCappedPayload
+func (t *EventPayload) FromHealActionCappedPayload(v HealActionCappedPayload) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHealActionCappedPayload performs a merge with any union data inside the EventPayload, using the provided HealActionCappedPayload
+func (t *EventPayload) MergeHealActionCappedPayload(v HealActionCappedPayload) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsHealActionPayload returns the union data inside the EventPayload as a HealActionPayload
+func (t EventPayload) AsHealActionPayload() (HealActionPayload, error) {
+	var body HealActionPayload
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHealActionPayload overwrites any union data inside the EventPayload as the provided HealActionPayload
+func (t *EventPayload) FromHealActionPayload(v HealActionPayload) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHealActionPayload performs a merge with any union data inside the EventPayload, using the provided HealActionPayload
+func (t *EventPayload) MergeHealActionPayload(v HealActionPayload) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsHealStallDetectedPayload returns the union data inside the EventPayload as a HealStallDetectedPayload
+func (t EventPayload) AsHealStallDetectedPayload() (HealStallDetectedPayload, error) {
+	var body HealStallDetectedPayload
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHealStallDetectedPayload overwrites any union data inside the EventPayload as the provided HealStallDetectedPayload
+func (t *EventPayload) FromHealStallDetectedPayload(v HealStallDetectedPayload) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHealStallDetectedPayload performs a merge with any union data inside the EventPayload, using the provided HealStallDetectedPayload
+func (t *EventPayload) MergeHealStallDetectedPayload(v HealStallDetectedPayload) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -13550,6 +13754,90 @@ func (t *TypedEventStreamEnvelope) MergeTypedEventStreamEnvelopeGcStoreMaintenan
 	return err
 }
 
+// AsTypedEventStreamEnvelopeHealAction returns the union data inside the TypedEventStreamEnvelope as a TypedEventStreamEnvelopeHealAction
+func (t TypedEventStreamEnvelope) AsTypedEventStreamEnvelopeHealAction() (TypedEventStreamEnvelopeHealAction, error) {
+	var body TypedEventStreamEnvelopeHealAction
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTypedEventStreamEnvelopeHealAction overwrites any union data inside the TypedEventStreamEnvelope as the provided TypedEventStreamEnvelopeHealAction
+func (t *TypedEventStreamEnvelope) FromTypedEventStreamEnvelopeHealAction(v TypedEventStreamEnvelopeHealAction) error {
+	v.Type = "heal.action"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTypedEventStreamEnvelopeHealAction performs a merge with any union data inside the TypedEventStreamEnvelope, using the provided TypedEventStreamEnvelopeHealAction
+func (t *TypedEventStreamEnvelope) MergeTypedEventStreamEnvelopeHealAction(v TypedEventStreamEnvelopeHealAction) error {
+	v.Type = "heal.action"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTypedEventStreamEnvelopeHealCapped returns the union data inside the TypedEventStreamEnvelope as a TypedEventStreamEnvelopeHealCapped
+func (t TypedEventStreamEnvelope) AsTypedEventStreamEnvelopeHealCapped() (TypedEventStreamEnvelopeHealCapped, error) {
+	var body TypedEventStreamEnvelopeHealCapped
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTypedEventStreamEnvelopeHealCapped overwrites any union data inside the TypedEventStreamEnvelope as the provided TypedEventStreamEnvelopeHealCapped
+func (t *TypedEventStreamEnvelope) FromTypedEventStreamEnvelopeHealCapped(v TypedEventStreamEnvelopeHealCapped) error {
+	v.Type = "heal.capped"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTypedEventStreamEnvelopeHealCapped performs a merge with any union data inside the TypedEventStreamEnvelope, using the provided TypedEventStreamEnvelopeHealCapped
+func (t *TypedEventStreamEnvelope) MergeTypedEventStreamEnvelopeHealCapped(v TypedEventStreamEnvelopeHealCapped) error {
+	v.Type = "heal.capped"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTypedEventStreamEnvelopeHealStallDetected returns the union data inside the TypedEventStreamEnvelope as a TypedEventStreamEnvelopeHealStallDetected
+func (t TypedEventStreamEnvelope) AsTypedEventStreamEnvelopeHealStallDetected() (TypedEventStreamEnvelopeHealStallDetected, error) {
+	var body TypedEventStreamEnvelopeHealStallDetected
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTypedEventStreamEnvelopeHealStallDetected overwrites any union data inside the TypedEventStreamEnvelope as the provided TypedEventStreamEnvelopeHealStallDetected
+func (t *TypedEventStreamEnvelope) FromTypedEventStreamEnvelopeHealStallDetected(v TypedEventStreamEnvelopeHealStallDetected) error {
+	v.Type = "heal.stall_detected"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTypedEventStreamEnvelopeHealStallDetected performs a merge with any union data inside the TypedEventStreamEnvelope, using the provided TypedEventStreamEnvelopeHealStallDetected
+func (t *TypedEventStreamEnvelope) MergeTypedEventStreamEnvelopeHealStallDetected(v TypedEventStreamEnvelopeHealStallDetected) error {
+	v.Type = "heal.stall_detected"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 // AsTypedEventStreamEnvelopeMailArchived returns the union data inside the TypedEventStreamEnvelope as a TypedEventStreamEnvelopeMailArchived
 func (t TypedEventStreamEnvelope) AsTypedEventStreamEnvelopeMailArchived() (TypedEventStreamEnvelopeMailArchived, error) {
 	var body TypedEventStreamEnvelopeMailArchived
@@ -15012,6 +15300,12 @@ func (t TypedEventStreamEnvelope) ValueByDiscriminator() (interface{}, error) {
 		return t.AsTypedEventStreamEnvelopeGcStoreMaintenanceDone()
 	case "gc.store.maintenance.failed":
 		return t.AsTypedEventStreamEnvelopeGcStoreMaintenanceFailed()
+	case "heal.action":
+		return t.AsTypedEventStreamEnvelopeHealAction()
+	case "heal.capped":
+		return t.AsTypedEventStreamEnvelopeHealCapped()
+	case "heal.stall_detected":
+		return t.AsTypedEventStreamEnvelopeHealStallDetected()
 	case "mail.archived":
 		return t.AsTypedEventStreamEnvelopeMailArchived()
 	case "mail.deleted":
@@ -16149,6 +16443,90 @@ func (t *TypedTaggedEventStreamEnvelope) FromTypedTaggedEventStreamEnvelopeGcSto
 // MergeTypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed performs a merge with any union data inside the TypedTaggedEventStreamEnvelope, using the provided TypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed
 func (t *TypedTaggedEventStreamEnvelope) MergeTypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed(v TypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed) error {
 	v.Type = "gc.store.maintenance.failed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTypedTaggedEventStreamEnvelopeHealAction returns the union data inside the TypedTaggedEventStreamEnvelope as a TypedTaggedEventStreamEnvelopeHealAction
+func (t TypedTaggedEventStreamEnvelope) AsTypedTaggedEventStreamEnvelopeHealAction() (TypedTaggedEventStreamEnvelopeHealAction, error) {
+	var body TypedTaggedEventStreamEnvelopeHealAction
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTypedTaggedEventStreamEnvelopeHealAction overwrites any union data inside the TypedTaggedEventStreamEnvelope as the provided TypedTaggedEventStreamEnvelopeHealAction
+func (t *TypedTaggedEventStreamEnvelope) FromTypedTaggedEventStreamEnvelopeHealAction(v TypedTaggedEventStreamEnvelopeHealAction) error {
+	v.Type = "heal.action"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTypedTaggedEventStreamEnvelopeHealAction performs a merge with any union data inside the TypedTaggedEventStreamEnvelope, using the provided TypedTaggedEventStreamEnvelopeHealAction
+func (t *TypedTaggedEventStreamEnvelope) MergeTypedTaggedEventStreamEnvelopeHealAction(v TypedTaggedEventStreamEnvelopeHealAction) error {
+	v.Type = "heal.action"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTypedTaggedEventStreamEnvelopeHealCapped returns the union data inside the TypedTaggedEventStreamEnvelope as a TypedTaggedEventStreamEnvelopeHealCapped
+func (t TypedTaggedEventStreamEnvelope) AsTypedTaggedEventStreamEnvelopeHealCapped() (TypedTaggedEventStreamEnvelopeHealCapped, error) {
+	var body TypedTaggedEventStreamEnvelopeHealCapped
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTypedTaggedEventStreamEnvelopeHealCapped overwrites any union data inside the TypedTaggedEventStreamEnvelope as the provided TypedTaggedEventStreamEnvelopeHealCapped
+func (t *TypedTaggedEventStreamEnvelope) FromTypedTaggedEventStreamEnvelopeHealCapped(v TypedTaggedEventStreamEnvelopeHealCapped) error {
+	v.Type = "heal.capped"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTypedTaggedEventStreamEnvelopeHealCapped performs a merge with any union data inside the TypedTaggedEventStreamEnvelope, using the provided TypedTaggedEventStreamEnvelopeHealCapped
+func (t *TypedTaggedEventStreamEnvelope) MergeTypedTaggedEventStreamEnvelopeHealCapped(v TypedTaggedEventStreamEnvelopeHealCapped) error {
+	v.Type = "heal.capped"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTypedTaggedEventStreamEnvelopeHealStallDetected returns the union data inside the TypedTaggedEventStreamEnvelope as a TypedTaggedEventStreamEnvelopeHealStallDetected
+func (t TypedTaggedEventStreamEnvelope) AsTypedTaggedEventStreamEnvelopeHealStallDetected() (TypedTaggedEventStreamEnvelopeHealStallDetected, error) {
+	var body TypedTaggedEventStreamEnvelopeHealStallDetected
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTypedTaggedEventStreamEnvelopeHealStallDetected overwrites any union data inside the TypedTaggedEventStreamEnvelope as the provided TypedTaggedEventStreamEnvelopeHealStallDetected
+func (t *TypedTaggedEventStreamEnvelope) FromTypedTaggedEventStreamEnvelopeHealStallDetected(v TypedTaggedEventStreamEnvelopeHealStallDetected) error {
+	v.Type = "heal.stall_detected"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTypedTaggedEventStreamEnvelopeHealStallDetected performs a merge with any union data inside the TypedTaggedEventStreamEnvelope, using the provided TypedTaggedEventStreamEnvelopeHealStallDetected
+func (t *TypedTaggedEventStreamEnvelope) MergeTypedTaggedEventStreamEnvelopeHealStallDetected(v TypedTaggedEventStreamEnvelopeHealStallDetected) error {
+	v.Type = "heal.stall_detected"
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -17621,6 +17999,12 @@ func (t TypedTaggedEventStreamEnvelope) ValueByDiscriminator() (interface{}, err
 		return t.AsTypedTaggedEventStreamEnvelopeGcStoreMaintenanceDone()
 	case "gc.store.maintenance.failed":
 		return t.AsTypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed()
+	case "heal.action":
+		return t.AsTypedTaggedEventStreamEnvelopeHealAction()
+	case "heal.capped":
+		return t.AsTypedTaggedEventStreamEnvelopeHealCapped()
+	case "heal.stall_detected":
+		return t.AsTypedTaggedEventStreamEnvelopeHealStallDetected()
 	case "mail.archived":
 		return t.AsTypedTaggedEventStreamEnvelopeMailArchived()
 	case "mail.deleted":

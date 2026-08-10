@@ -2428,6 +2428,15 @@
             "$ref": "#/components/schemas/GroupCreatedEventPayload"
           },
           {
+            "$ref": "#/components/schemas/HealActionCappedPayload"
+          },
+          {
+            "$ref": "#/components/schemas/HealActionPayload"
+          },
+          {
+            "$ref": "#/components/schemas/HealStallDetectedPayload"
+          },
+          {
             "$ref": "#/components/schemas/InboundEventPayload"
           },
           {
@@ -3619,6 +3628,90 @@
           "Match",
           "TargetSessionID",
           "UpdateCursor"
+        ],
+        "type": "object"
+      },
+      "HealActionCappedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rig": {
+            "type": "string"
+          },
+          "rung": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rung",
+          "kind",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "HealActionPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "rig": {
+            "type": "string"
+          },
+          "rung": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rung",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "HealStallDetectedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "landed_commits": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "oldest_demand_age_s": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rig": {
+            "type": "string"
+          },
+          "window_s": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rig",
+          "branch",
+          "window_s",
+          "landed_commits",
+          "oldest_demand_age_s"
         ],
         "type": "object"
       },
@@ -11957,6 +12050,9 @@
             "gc.store.disk_warn": "#/components/schemas/TypedEventStreamEnvelopeGcStoreDiskWarn",
             "gc.store.maintenance.done": "#/components/schemas/TypedEventStreamEnvelopeGcStoreMaintenanceDone",
             "gc.store.maintenance.failed": "#/components/schemas/TypedEventStreamEnvelopeGcStoreMaintenanceFailed",
+            "heal.action": "#/components/schemas/TypedEventStreamEnvelopeHealAction",
+            "heal.capped": "#/components/schemas/TypedEventStreamEnvelopeHealCapped",
+            "heal.stall_detected": "#/components/schemas/TypedEventStreamEnvelopeHealStallDetected",
             "mail.archived": "#/components/schemas/TypedEventStreamEnvelopeMailArchived",
             "mail.deleted": "#/components/schemas/TypedEventStreamEnvelopeMailDeleted",
             "mail.marked_read": "#/components/schemas/TypedEventStreamEnvelopeMailMarkedRead",
@@ -12119,6 +12215,15 @@
           },
           {
             "$ref": "#/components/schemas/TypedEventStreamEnvelopeGcStoreMaintenanceFailed"
+          },
+          {
+            "$ref": "#/components/schemas/TypedEventStreamEnvelopeHealAction"
+          },
+          {
+            "$ref": "#/components/schemas/TypedEventStreamEnvelopeHealCapped"
+          },
+          {
+            "$ref": "#/components/schemas/TypedEventStreamEnvelopeHealStallDetected"
           },
           {
             "$ref": "#/components/schemas/TypedEventStreamEnvelopeMailArchived"
@@ -13413,6 +13518,9 @@
                 "gc.store.maintenance.failed",
                 "gc.store.disk_warn",
                 "gc.store.disk_critical",
+                "heal.stall_detected",
+                "heal.action",
+                "heal.capped",
                 "backend.credential_resolved",
                 "emergency.signaled",
                 "emergency.acked",
@@ -14520,6 +14628,177 @@
           "payload"
         ],
         "title": "TypedEventStreamEnvelope gc.store.maintenance.failed",
+        "type": "object"
+      },
+      "TypedEventStreamEnvelopeHealAction": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "depends_on_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealActionPayload"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "heal.action",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload"
+        ],
+        "title": "TypedEventStreamEnvelope heal.action",
+        "type": "object"
+      },
+      "TypedEventStreamEnvelopeHealCapped": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "depends_on_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealActionCappedPayload"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "heal.capped",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload"
+        ],
+        "title": "TypedEventStreamEnvelope heal.capped",
+        "type": "object"
+      },
+      "TypedEventStreamEnvelopeHealStallDetected": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "depends_on_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealStallDetectedPayload"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "heal.stall_detected",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload"
+        ],
+        "title": "TypedEventStreamEnvelope heal.stall_detected",
         "type": "object"
       },
       "TypedEventStreamEnvelopeMailArchived": {
@@ -17299,6 +17578,9 @@
             "gc.store.disk_warn": "#/components/schemas/TypedTaggedEventStreamEnvelopeGcStoreDiskWarn",
             "gc.store.maintenance.done": "#/components/schemas/TypedTaggedEventStreamEnvelopeGcStoreMaintenanceDone",
             "gc.store.maintenance.failed": "#/components/schemas/TypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed",
+            "heal.action": "#/components/schemas/TypedTaggedEventStreamEnvelopeHealAction",
+            "heal.capped": "#/components/schemas/TypedTaggedEventStreamEnvelopeHealCapped",
+            "heal.stall_detected": "#/components/schemas/TypedTaggedEventStreamEnvelopeHealStallDetected",
             "mail.archived": "#/components/schemas/TypedTaggedEventStreamEnvelopeMailArchived",
             "mail.deleted": "#/components/schemas/TypedTaggedEventStreamEnvelopeMailDeleted",
             "mail.marked_read": "#/components/schemas/TypedTaggedEventStreamEnvelopeMailMarkedRead",
@@ -17461,6 +17743,15 @@
           },
           {
             "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeGcStoreMaintenanceFailed"
+          },
+          {
+            "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeHealAction"
+          },
+          {
+            "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeHealCapped"
+          },
+          {
+            "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeHealStallDetected"
           },
           {
             "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeMailArchived"
@@ -18830,6 +19121,9 @@
                 "gc.store.maintenance.failed",
                 "gc.store.disk_warn",
                 "gc.store.disk_critical",
+                "heal.stall_detected",
+                "heal.action",
+                "heal.capped",
                 "backend.credential_resolved",
                 "emergency.signaled",
                 "emergency.acked",
@@ -20014,6 +20308,189 @@
           "city"
         ],
         "title": "TypedTaggedEventStreamEnvelope gc.store.maintenance.failed",
+        "type": "object"
+      },
+      "TypedTaggedEventStreamEnvelopeHealAction": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "depends_on_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealActionPayload"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "heal.action",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload",
+          "city"
+        ],
+        "title": "TypedTaggedEventStreamEnvelope heal.action",
+        "type": "object"
+      },
+      "TypedTaggedEventStreamEnvelopeHealCapped": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "depends_on_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealActionCappedPayload"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "heal.capped",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload",
+          "city"
+        ],
+        "title": "TypedTaggedEventStreamEnvelope heal.capped",
+        "type": "object"
+      },
+      "TypedTaggedEventStreamEnvelopeHealStallDetected": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "depends_on_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealStallDetectedPayload"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "heal.stall_detected",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload",
+          "city"
+        ],
+        "title": "TypedTaggedEventStreamEnvelope heal.stall_detected",
         "type": "object"
       },
       "TypedTaggedEventStreamEnvelopeMailArchived": {

@@ -132,6 +132,14 @@ func ValidateDurations(cfg *City, source string) []string {
 	check("[maintenance.dolt]", "interval", cfg.Maintenance.Dolt.Interval)
 	check("[maintenance.dolt]", "gc_timeout", cfg.Maintenance.Dolt.GCTimeout)
 
+	// Heal loop durations.
+	check("[heal]", "interval", cfg.Heal.Interval)
+	check("[heal]", "stall_after", cfg.Heal.StallAfter)
+	check("[heal]", "orphan_stale_after", cfg.Heal.OrphanStaleAfter)
+	check("[heal]", "inversion_after", cfg.Heal.InversionAfter)
+	check("[heal]", "stuck_after", cfg.Heal.StuckAfter)
+	check("[heal]", "action_cooldown", cfg.Heal.ActionCooldown)
+
 	// Session sleep config durations.
 	checkSleep("[session_sleep]", "interactive_resume", cfg.SessionSleep.InteractiveResume)
 	checkSleep("[session_sleep]", "interactive_fresh", cfg.SessionSleep.InteractiveFresh)

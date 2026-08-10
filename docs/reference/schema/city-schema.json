@@ -1212,6 +1212,10 @@
           "$ref": "#/$defs/MaintenanceConfig",
           "description": "Maintenance configures periodic store-maintenance loops."
         },
+        "heal": {
+          "$ref": "#/$defs/HealConfig",
+          "description": "Heal configures the deterministic self-healing throughput loop\n(stall detection + autonomous remediation ladder)."
+        },
         "service": {
           "items": {
             "$ref": "#/$defs/Service"
@@ -1769,6 +1773,104 @@
         "name"
       ],
       "description": "GitHubPRMonitorPatch modifies an existing GitHub PR readiness monitor by name."
+    },
+    "HealConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enabled toggles the heal loop. Defaults to false (opt-in). The\ncontroller runs the loop as a periodic watchdog when enabled; `gc heal`\nruns one pass regardless (so an external scheduler can drive it even\nwhen the controller is the thing that is broken)."
+        },
+        "interval": {
+          "type": "string",
+          "description": "Interval is the cadence between controller-driven heal passes as a\nduration string. Defaults to 5m.",
+          "default": "5m"
+        },
+        "stall_after": {
+          "type": "string",
+          "description": "StallAfter is the throughput stall window as a duration string. A rig\nis stalled when no commit landed on its mainline within this window\nwhile actionable work older than the window exists. Defaults to 30m.",
+          "default": "30m"
+        },
+        "orphan_stale_after": {
+          "type": "string",
+          "description": "OrphanStaleAfter is the minimum age (since last update) before an\nassigned-but-unclaimed routed bead is treated as orphaned and returned\nto the pool, and before work held by a dead session is released.\nDefaults to 20m.",
+          "default": "20m"
+        },
+        "inversion_after": {
+          "type": "string",
+          "description": "InversionAfter is the minimum unclaimed age before a ready bead at or\nabove InversionPriority counts as priority-inverted. Defaults to 15m.",
+          "default": "15m"
+        },
+        "inversion_priority": {
+          "type": "integer",
+          "description": "InversionPriority is the highest (numerically largest) priority class\nprotected against inversion. Defaults to 0: only P0 beads are\nforce-assigned past pool ordering.",
+          "default": 0
+        },
+        "stuck_after": {
+          "type": "string",
+          "description": "StuckAfter is the minimum age (since last bead update) before a live\nsession holding in_progress work is treated as stuck. Defaults to 2h.",
+          "default": "2h"
+        },
+        "action_cooldown": {
+          "type": "string",
+          "description": "ActionCooldown is the per-subject re-action floor. A bead or session\nthe loop already acted on within this window is skipped and the skip is\nrecorded loudly (heal.capped event) instead of thrashing. Defaults to 1h.",
+          "default": "1h"
+        },
+        "max_actions_per_pass": {
+          "type": "integer",
+          "description": "MaxActionsPerPass caps mutating actions in a single pass, bounding the\nblast radius of any misdetection. Defaults to 5.",
+          "default": 5
+        },
+        "critical_sessions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "CriticalSessions lists session targets (agent/session names) the loop\nmust keep running — coordinator-style singletons whose downtime is rig\ndowntime. A session in this list that is not running is started,\nsubject to the action cooldown. Empty disables the rung."
+        },
+        "target": {
+          "items": {
+            "$ref": "#/$defs/HealTarget"
+          },
+          "type": "array",
+          "description": "Targets declares the rigs the loop watches ([[heal.target]])."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "HealConfig declares the self-healing throughput loop ([heal] in city.toml)."
+    },
+    "HealTarget": {
+      "properties": {
+        "rig": {
+          "type": "string",
+          "description": "Rig is the rig name (must match a [[rigs]] entry)."
+        },
+        "queue_addresses": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "QueueAddresses lists assignees whose assigned-open beads are real scan\nqueues (merge queues and similar): rung 1 never releases their beads\nback to the pool, and rung 3 never treats their holders as stuck."
+        },
+        "main_red_check": {
+          "type": "string",
+          "description": "MainRedCheck is a shell command run in the rig repository that exits 0\nwhen the mainline is green and non-zero when it is red (e.g. a `gh`\nquery against the latest mainline check run). Empty disables the\nmainline-red rung for this target."
+        },
+        "main_red_route": {
+          "type": "string",
+          "description": "MainRedRoute is the routed-work target (gc.routed_to value) for the\nrepair bead the loop files when MainRedCheck reports red. Required for\nthe repair bead to be claimable; empty disables filing."
+        },
+        "main_red_workflow": {
+          "type": "string",
+          "description": "MainRedWorkflow is the formula stamped on the filed repair bead. Empty\nfiles a plain routed task."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "rig"
+      ],
+      "description": "HealTarget declares one rig watched by the heal loop."
     },
     "Import": {
       "properties": {
