@@ -559,13 +559,36 @@ func TestHealRestartsCriticalSessionWithCooldown(t *testing.T) {
 		t.Error("cooldown suppression not recorded loudly")
 	}
 
-	// A running critical session is left alone.
+	// A healthy critical session (runtime present AND agent process alive)
+	// is left alone.
 	env.started = nil
 	env.recent = map[string]time.Time{}
 	env.running["coordinator"] = true
+	env.alive["coordinator"] = true
 	runHealPass(env.deps())
 	if len(env.started) != 0 {
 		t.Errorf("started while running = %v, want none", env.started)
+	}
+}
+
+// TestHealRestartsCriticalSessionWithDeadProcess covers the crashed-agent
+// shape: the runtime session survives (Running=true) but the agent process
+// inside is dead (Alive=false). The rung must clear the dead runtime and
+// start fresh — gating on Running alone would leave the coordinator down.
+func TestHealRestartsCriticalSessionWithDeadProcess(t *testing.T) {
+	env := newHealTestEnv(t)
+	env.landed = 5
+	env.cfg.Heal.CriticalSessions = []string{"coordinator"}
+	env.running["coordinator"] = true // runtime shell survives
+	// alive stays false: the agent process crashed.
+
+	runHealPass(env.deps())
+
+	if len(env.killed) != 1 || env.killed[0] != "coordinator" {
+		t.Errorf("killed = %v, want [coordinator] (dead runtime cleared before restart)", env.killed)
+	}
+	if len(env.started) != 1 || env.started[0] != "coordinator" {
+		t.Errorf("started = %v, want [coordinator]", env.started)
 	}
 }
 

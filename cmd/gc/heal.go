@@ -92,7 +92,8 @@ type healDeps struct {
 	ListOpenSessions func() ([]session.Info, error)
 	// Observe probes the live runtime state of one session target.
 	Observe func(target string) (worker.LiveObservation, error)
-	// Kill terminates a session's runtime (rung 3 stuck restart).
+	// Kill terminates a session's runtime (rung 3 stuck restart, and rung 5
+	// clearing a dead runtime before a critical-session restart).
 	Kill func(target string) error
 	// Start ensures a configured session target is running (rung 5).
 	Start func(target string) error
@@ -565,7 +566,10 @@ func (p *healPass) healCriticalSessions() {
 			continue
 		}
 		obs, err := p.observe(name)
-		if err == nil && obs.Running {
+		// Down means not (Running && Alive): a crashed agent process inside a
+		// surviving runtime session reports Running=true, Alive=false, and is
+		// exactly the coordinator-down shape this rung exists for.
+		if err == nil && obs.Running && obs.Alive {
 			continue
 		}
 		subject := "session:" + name
@@ -573,14 +577,24 @@ func (p *healPass) healCriticalSessions() {
 			continue
 		}
 		before := "not running"
+		deadRuntime := err == nil && obs.Running && !obs.Alive
 		if err != nil {
 			before = "unobservable: " + err.Error()
+		} else if deadRuntime {
+			before = "runtime present but agent process dead"
 		}
 		action := healAction{
 			Rung: 5, Kind: "critical-restart", Subject: subject,
 			Before: before, After: "start requested",
 		}
 		if p.mutate(func() error {
+			if deadRuntime {
+				// The dead runtime holds the session identity; clear it so
+				// the start path can recreate the session.
+				if killErr := p.deps.Kill(name); killErr != nil {
+					return fmt.Errorf("killing dead runtime for %q before restart: %w", name, killErr)
+				}
+			}
 			return p.deps.Start(name)
 		}, &action) {
 			p.record(action)
