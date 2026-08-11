@@ -123,6 +123,7 @@ const (
 	FormulaSourceMetadataKey             = "gc.formula_source"
 	GCExemptMetadataKey                  = "gc.gc_exempt"
 	Graphv2RootKeyMetadataKey            = "gc.graphv2_root_key"
+	HealReasonMetadataKey                = "gc.heal.reason"
 	IdempotencyKeyMetadataKey            = "gc.idempotency_key"
 	InputConvoyIDMetadataKey             = "gc.input_convoy_id"
 	InstantiatingMetadataKey             = "gc.instantiating"
@@ -373,6 +374,7 @@ var KnownMetadataKeys = []string{
 	FormulaSourceMetadataKey,
 	GCExemptMetadataKey,
 	Graphv2RootKeyMetadataKey,
+	HealReasonMetadataKey,
 	IdempotencyKeyMetadataKey,
 	InputConvoyIDMetadataKey,
 	InstantiatingMetadataKey,

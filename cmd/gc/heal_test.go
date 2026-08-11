@@ -511,7 +511,7 @@ func TestHealMainRedFilesOneRoutedRepairBead(t *testing.T) {
 	if report.Rigs[0].Stalled {
 		t.Fatalf("red mainline misread as stall: %+v", report.Rigs)
 	}
-	repairs, err := env.store.List(beads.ListQuery{Metadata: map[string]string{healReasonMetadataKey: healMainRedReason}})
+	repairs, err := env.store.List(beads.ListQuery{Metadata: map[string]string{beadmeta.HealReasonMetadataKey: healMainRedReason}})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -528,7 +528,7 @@ func TestHealMainRedFilesOneRoutedRepairBead(t *testing.T) {
 
 	// Second pass: the open repair bead dedupes — no duplicate filed.
 	runHealPass(env.deps())
-	repairs, err = env.store.List(beads.ListQuery{Metadata: map[string]string{healReasonMetadataKey: healMainRedReason}})
+	repairs, err = env.store.List(beads.ListQuery{Metadata: map[string]string{beadmeta.HealReasonMetadataKey: healMainRedReason}})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

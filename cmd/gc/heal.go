@@ -67,12 +67,8 @@ import (
 const healActorName = "gc-heal"
 
 // healMainRedReason is the dedupe marker stamped on auto-filed mainline-red
-// repair beads (metadata key healReasonMetadataKey).
+// repair beads (metadata key beadmeta.HealReasonMetadataKey).
 const healMainRedReason = "main-red"
-
-// healReasonMetadataKey marks beads created by the heal loop with the
-// detection that produced them.
-const healReasonMetadataKey = "gc.heal.reason"
 
 // healCheckTimeout bounds the configured main_red_check command.
 const healCheckTimeout = 60 * time.Second
@@ -500,7 +496,7 @@ func (p *healPass) healMainRed(target config.HealTarget, store beads.Store, bran
 	if route == "" {
 		return
 	}
-	existing, err := store.List(beads.ListQuery{Metadata: map[string]string{healReasonMetadataKey: healMainRedReason}, IncludeClosed: false})
+	existing, err := store.List(beads.ListQuery{Metadata: map[string]string{beadmeta.HealReasonMetadataKey: healMainRedReason}, IncludeClosed: false})
 	if err != nil {
 		p.errf("heal: rung 4 dedupe query for rig %q: %v", target.Rig, err)
 		return
@@ -530,9 +526,9 @@ func (p *healPass) healMainRed(target config.HealTarget, store beads.Store, bran
 					"check on %s, fix it on a branch, and submit through the normal merge flow.",
 				branch, target.Rig, branch),
 			Metadata: map[string]string{
-				beadmeta.RoutedToMetadataKey: route,
-				healReasonMetadataKey:        healMainRedReason,
-				"source":                     healActorName,
+				beadmeta.RoutedToMetadataKey:   route,
+				beadmeta.HealReasonMetadataKey: healMainRedReason,
+				"source":                       healActorName,
 			},
 		})
 		if err != nil {
