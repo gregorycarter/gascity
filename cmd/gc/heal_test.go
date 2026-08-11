@@ -595,7 +595,8 @@ func TestHealRestartsCriticalSessionWithDeadProcess(t *testing.T) {
 func TestHealBudgetCapsActionsPerPass(t *testing.T) {
 	env := newHealTestEnv(t)
 	env.landed = 0
-	env.cfg.Heal.MaxActionsPerPass = 1
+	one := 1
+	env.cfg.Heal.MaxActionsPerPass = &one
 
 	first := env.createRouted(t, func(o *beads.UpdateOpts) {
 		o.Assignee = strPtr("coordinator-address")

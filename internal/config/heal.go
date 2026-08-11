@@ -44,8 +44,10 @@ type HealConfig struct {
 	InversionAfter string `toml:"inversion_after,omitempty" jsonschema:"default=15m"`
 	// InversionPriority is the highest (numerically largest) priority class
 	// protected against inversion. Defaults to 0: only P0 beads are
-	// force-assigned past pool ordering.
-	InversionPriority int `toml:"inversion_priority,omitempty" jsonschema:"default=0"`
+	// force-assigned past pool ordering. Pointer so an unset section marshals
+	// away: `omitempty` does not suppress a zero-valued int, and 0 is also a
+	// meaningful explicit setting here.
+	InversionPriority *int `toml:"inversion_priority,omitempty" jsonschema:"default=0"`
 	// StuckAfter is the minimum age (since last bead update) before a live
 	// session holding in_progress work is treated as stuck. Defaults to 2h.
 	StuckAfter string `toml:"stuck_after,omitempty" jsonschema:"default=2h"`
@@ -54,8 +56,9 @@ type HealConfig struct {
 	// recorded loudly (heal.capped event) instead of thrashing. Defaults to 1h.
 	ActionCooldown string `toml:"action_cooldown,omitempty" jsonschema:"default=1h"`
 	// MaxActionsPerPass caps mutating actions in a single pass, bounding the
-	// blast radius of any misdetection. Defaults to 5.
-	MaxActionsPerPass int `toml:"max_actions_per_pass,omitempty" jsonschema:"default=5"`
+	// blast radius of any misdetection. Defaults to 5. Pointer for the same
+	// marshal reason as InversionPriority.
+	MaxActionsPerPass *int `toml:"max_actions_per_pass,omitempty" jsonschema:"default=5"`
 	// CriticalSessions lists session targets (agent/session names) the loop
 	// must keep running — coordinator-style singletons whose downtime is rig
 	// downtime. A session in this list that is not running is started,
@@ -97,6 +100,7 @@ const (
 	defaultHealStuckAfter        = 2 * time.Hour
 	defaultHealActionCooldown    = time.Hour
 	defaultHealMaxActionsPerPass = 5
+	defaultHealInversionPriority = 0
 )
 
 // IntervalOrDefault returns the parsed Interval, defaulting to 5m.
@@ -132,10 +136,19 @@ func (h HealConfig) ActionCooldownOrDefault() time.Duration {
 
 // MaxActionsPerPassOrDefault returns MaxActionsPerPass, defaulting to 5.
 func (h HealConfig) MaxActionsPerPassOrDefault() int {
-	if h.MaxActionsPerPass <= 0 {
+	if h.MaxActionsPerPass == nil || *h.MaxActionsPerPass <= 0 {
 		return defaultHealMaxActionsPerPass
 	}
-	return h.MaxActionsPerPass
+	return *h.MaxActionsPerPass
+}
+
+// InversionPriorityOrDefault returns InversionPriority, defaulting to 0 —
+// only P0 beads are force-assigned past pool ordering.
+func (h HealConfig) InversionPriorityOrDefault() int {
+	if h.InversionPriority == nil {
+		return defaultHealInversionPriority
+	}
+	return *h.InversionPriority
 }
 
 // ValidateHealConfig checks [heal] declarations against the rest of the city
@@ -146,8 +159,8 @@ func ValidateHealConfig(cfg *City) error {
 		return nil
 	}
 	h := cfg.Heal
-	if h.InversionPriority < 0 {
-		return fmt.Errorf("[heal]: inversion_priority must be >= 0, got %d", h.InversionPriority)
+	if h.InversionPriority != nil && *h.InversionPriority < 0 {
+		return fmt.Errorf("[heal]: inversion_priority must be >= 0, got %d", *h.InversionPriority)
 	}
 	for i, name := range h.CriticalSessions {
 		if strings.TrimSpace(name) == "" {

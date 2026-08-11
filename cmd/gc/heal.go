@@ -298,7 +298,7 @@ func (p *healPass) healOrphanedRoutedWork(target config.HealTarget, store beads.
 // stale lower-priority bead.
 func (p *healPass) healPriorityInversion(target config.HealTarget, store beads.Store, sessions []session.Info, busy map[string]bool) {
 	inversionAfter := p.deps.Cfg.Heal.InversionAfterOrDefault()
-	maxPriority := p.deps.Cfg.Heal.InversionPriority
+	maxPriority := p.deps.Cfg.Heal.InversionPriorityOrDefault()
 	ready, err := store.Ready(beads.ReadyQuery{})
 	if err != nil {
 		p.errf("heal: rung 2 ready query for rig %q: %v", target.Rig, err)

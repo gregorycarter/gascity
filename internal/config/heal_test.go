@@ -32,12 +32,16 @@ func TestHealConfigDefaults(t *testing.T) {
 	if got := h.MaxActionsPerPassOrDefault(); got != 5 {
 		t.Errorf("MaxActionsPerPassOrDefault = %d, want 5", got)
 	}
-	if h.InversionPriority != 0 {
-		t.Errorf("zero-value InversionPriority = %d, want 0 (P0)", h.InversionPriority)
+	if got := h.InversionPriorityOrDefault(); got != 0 {
+		t.Errorf("InversionPriorityOrDefault = %d, want 0 (P0)", got)
+	}
+	if h.InversionPriority != nil {
+		t.Errorf("zero-value InversionPriority = %v, want nil (unset)", h.InversionPriority)
 	}
 }
 
 func TestHealConfigExplicitValuesWin(t *testing.T) {
+	two := 2
 	h := HealConfig{
 		Interval:          "90s",
 		StallAfter:        "1h",
@@ -45,7 +49,7 @@ func TestHealConfigExplicitValuesWin(t *testing.T) {
 		InversionAfter:    "2m",
 		StuckAfter:        "45m",
 		ActionCooldown:    "10m",
-		MaxActionsPerPass: 2,
+		MaxActionsPerPass: &two,
 	}
 	if got := h.IntervalOrDefault(); got != 90*time.Second {
 		t.Errorf("IntervalOrDefault = %v, want 90s", got)
@@ -171,7 +175,8 @@ func TestValidateHealConfig(t *testing.T) {
 
 	t.Run("negative inversion priority fails", func(t *testing.T) {
 		cfg := base()
-		cfg.Heal = HealConfig{InversionPriority: -1}
+		negative := -1
+		cfg.Heal = HealConfig{InversionPriority: &negative}
 		err := ValidateHealConfig(cfg)
 		if err == nil || !strings.Contains(err.Error(), "inversion_priority") {
 			t.Fatalf("ValidateHealConfig = %v, want inversion_priority error", err)
@@ -186,4 +191,44 @@ func TestValidateHealConfig(t *testing.T) {
 			t.Fatalf("ValidateHealConfig = %v, want main_red_workflow error", err)
 		}
 	})
+}
+
+// TestHealConfigAbsentFromMarshalWhenUnset guards the marshal surface: a city
+// that never configured [heal] must not gain a `[heal]` section when it is
+// written back out. BurntSushi/toml's `omitempty` does not suppress zero-valued
+// numeric fields, so plain `int` members leak `= 0` lines into every generated
+// city.toml — which is why the optional numeric knobs are pointers.
+func TestHealConfigAbsentFromMarshalWhenUnset(t *testing.T) {
+	c := DefaultCity("bright-lights")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "heal") {
+		t.Errorf("unset [heal] leaked into marshaled city:\n%s", data)
+	}
+}
+
+// TestHealConfigMarshalRoundTripsExplicitValues confirms the pointer knobs
+// still serialize (and parse back) when a city sets them explicitly —
+// including inversion_priority = 0, whose meaning ("P0 only") coincides with
+// the zero value and must survive a write/read cycle.
+func TestHealConfigMarshalRoundTripsExplicitValues(t *testing.T) {
+	zero, five := 0, 5
+	c := DefaultCity("bright-lights")
+	c.Heal = HealConfig{Enabled: true, InversionPriority: &zero, MaxActionsPerPass: &five}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Heal.InversionPriority == nil || *got.Heal.InversionPriority != 0 {
+		t.Errorf("InversionPriority = %v, want explicit 0", got.Heal.InversionPriority)
+	}
+	if got.Heal.MaxActionsPerPass == nil || *got.Heal.MaxActionsPerPass != 5 {
+		t.Errorf("MaxActionsPerPass = %v, want 5", got.Heal.MaxActionsPerPass)
+	}
 }

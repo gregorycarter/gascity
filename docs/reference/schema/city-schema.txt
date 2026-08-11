@@ -1802,7 +1802,7 @@
         },
         "inversion_priority": {
           "type": "integer",
-          "description": "InversionPriority is the highest (numerically largest) priority class\nprotected against inversion. Defaults to 0: only P0 beads are\nforce-assigned past pool ordering.",
+          "description": "InversionPriority is the highest (numerically largest) priority class\nprotected against inversion. Defaults to 0: only P0 beads are\nforce-assigned past pool ordering. Pointer so an unset section marshals\naway: `omitempty` does not suppress a zero-valued int, and 0 is also a\nmeaningful explicit setting here.",
           "default": 0
         },
         "stuck_after": {
@@ -1817,7 +1817,7 @@
         },
         "max_actions_per_pass": {
           "type": "integer",
-          "description": "MaxActionsPerPass caps mutating actions in a single pass, bounding the\nblast radius of any misdetection. Defaults to 5.",
+          "description": "MaxActionsPerPass caps mutating actions in a single pass, bounding the\nblast radius of any misdetection. Defaults to 5. Pointer for the same\nmarshal reason as InversionPriority.",
           "default": 5
         },
         "critical_sessions": {
