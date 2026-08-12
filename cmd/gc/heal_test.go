@@ -802,6 +802,32 @@ func TestHealDryRunMutatesNothingAndRecordsNoEvents(t *testing.T) {
 	}
 }
 
+// TestHealDryRunReportsActionsWithoutAnAuditLedger covers the standalone
+// `gc heal --dry-run` wiring: it deliberately does not open an event recorder
+// because no event should be written. That absence must not suppress the
+// actions the dry-run is supposed to report.
+func TestHealDryRunReportsActionsWithoutAnAuditLedger(t *testing.T) {
+	env := newHealTestEnv(t)
+	env.landed = 0
+
+	orphan := env.createRouted(t, func(o *beads.UpdateOpts) {
+		o.Assignee = strPtr("coordinator-address")
+	})
+
+	deps := env.deps()
+	deps.DryRun = true
+	deps.Rec = nil
+	deps.RecentActions = func(time.Time) map[string]time.Time { return nil }
+	report := runHealPass(deps)
+
+	if got := env.get(t, orphan.ID); got.Assignee != "coordinator-address" {
+		t.Errorf("dry-run mutated bead without an audit ledger: assignee=%q", got.Assignee)
+	}
+	if len(report.Actions) != 1 || report.Actions[0].Kind != "orphan-release" || report.Actions[0].Capped {
+		t.Fatalf("dry-run actions = %+v, want one uncapped orphan release", report.Actions)
+	}
+}
+
 func TestHealRigRepoPath(t *testing.T) {
 	cases := []struct {
 		name string

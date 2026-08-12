@@ -177,7 +177,11 @@ func runHealPass(deps healDeps) healReport {
 	pass.cooldownReadable = deps.DryRun
 	if deps.RecentActions != nil {
 		pass.recent = deps.RecentActions(pass.now.Add(-pass.cooldown))
-		pass.cooldownReadable = pass.recent != nil
+		if pass.recent != nil {
+			pass.cooldownReadable = true
+		} else if !deps.DryRun {
+			pass.cooldownReadable = false
+		}
 	}
 	if !pass.cooldownReadable {
 		pass.errf("heal: audit ledger unavailable; refusing remediation without cooldown state")
