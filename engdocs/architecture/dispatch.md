@@ -159,12 +159,14 @@ resolution and predicates: `bdReadyPoolDemandShell(limitFlag)` reads the
 canonical `gc.routed_to=<target>` route with `--include-ephemeral`, and
 the temporary migration predicate reads `gc.run_target=<target>` only on
 `gc.kind=workflow` roots that predate root `gc.routed_to` stamping. The
-work-query form appends `--sort oldest --limit=1` to the canonical probe
-and prints the first match, then filters the migration probe to roots with
-empty `gc.routed_to`. That is an intentional routed-queue policy:
-unassigned routed pool work is FIFO before priority, so newer
-high-priority work does not jump ahead of older ready work already queued
-for the same target. The count form unions canonical and migration
+work-query form appends `--limit=20` to the canonical probe and preserves
+the reader's default ranking, then filters the migration probe to roots with
+empty `gc.routed_to`. Unassigned routed pool work is claimed in canonical
+ready order — priority, then `created_at`, then ID — so higher-priority work
+is claimed first while FIFO fairness applies within a priority band. The
+claim layer (`gc hook --claim`) re-imposes that order on the candidate batch,
+so a reader that concatenates or overrides its ordering cannot starve a
+higher-priority bead present in the batch. The count form unions canonical and migration
 probes and deduplicates by bead ID before piping through `jq 'length'`.
 Targets resolve to `Agent.PoolName` when set and
 `Agent.QualifiedName()` otherwise, so pool instances and pool templates
@@ -260,7 +262,8 @@ regressions.
     worker and reconciler must also share the temporary migration predicate
     for `gc.run_target=<target>` on `gc.kind=workflow` roots with empty
     `gc.routed_to`; only the worker's first-row form adds native
-    `bd ready --sort oldest --limit=1` selection to the canonical probe.
+    `bd ready --limit=20` selection in the reader's default
+    priority-first canonical order to the canonical probe.
     Any pool-demand predicate change to one (added filter, modified target
     resolution, new state) MUST be reflected in the other. Diverging the two
     re-introduces the protocol-mismatch class — the reconciler
@@ -372,8 +375,9 @@ name = "coder"
 pool = { min = 1, max = 3, check = "echo 2" }
 # Default sling_query: bd update {} --set-metadata gc.routed_to=coder
 # Default work_query: bd ready --include-ephemeral --metadata-field gc.routed_to=coder
-#   --unassigned --exclude-type=epic --json --sort oldest --limit=1,
-#   then a temporary gc.run_target workflow-root migration fallback
+#   --unassigned --exclude-type=epic --json --limit=20 (default priority-first
+#   canonical order), then a temporary gc.run_target workflow-root migration
+#   fallback
 ```
 
 System formulas are embedded in the `gc` binary and materialized to

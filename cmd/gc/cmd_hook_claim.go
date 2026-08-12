@@ -182,6 +182,12 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 	if len(candidates) == 0 {
 		return hookClaimResult{}
 	}
+	// Impose canonical ready order (priority, created_at, id) before any claim
+	// scan. A work-query reader can return a created-at-ordered, concatenated, or
+	// user-overridden batch; normalizing it ensures every tier attempts the
+	// highest-priority claimable bead first while preserving FIFO fairness within
+	// a priority band.
+	beads.SortBeadsReadyOrder(candidates)
 
 	if result, bead, ok := hookClaimExistingAssignment(candidates, *opts); ok {
 		return hookClaimResult{terminal: true, code: writeHookClaimWorkResultForBead(result, bead, *opts, *ops, dir, stdout, stderr)}
