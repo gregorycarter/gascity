@@ -2,6 +2,7 @@
 package overlay
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -133,7 +134,7 @@ func copyDirRecursive(srcBase, dstBase, rel string, stderr io.Writer, preserveEx
 				continue
 			}
 		}
-		if err := copyOrMergeFile(src, dst, IsMergeablePath(entryRel), WrapsBareHooks(entryRel)); err != nil {
+		if err := copyOrMergeFile(src, dst, entryRel); err != nil {
 			fmt.Fprintf(stderr, "overlay: %v\n", err) //nolint:errcheck
 		}
 	}
@@ -198,7 +199,7 @@ func copyDirWithSkipRecursive(srcBase, dstBase, rel string, skip SkipFunc) error
 
 		src := filepath.Join(srcBase, entryRel)
 		dst := filepath.Join(dstBase, entryRel)
-		if err := copyOrMergeFile(src, dst, IsMergeablePath(entryRel), WrapsBareHooks(entryRel)); err != nil {
+		if err := copyOrMergeFile(src, dst, entryRel); err != nil {
 			return err
 		}
 	}
@@ -356,15 +357,17 @@ func providerPreserveExisting(providerName string) preserveExistingFunc {
 	}
 }
 
-// copyOrMergeFile copies src to dst, optionally merging JSON if merge is true
-// and dst already exists. When wrapBareHooks is true (Claude settings), bare
-// hook entries in the result are normalized into wrapped form, both when
-// merging and when creating the file fresh. Falls back to plain copy on any
-// merge error.
-func copyOrMergeFile(src, dst string, merge, wrapBareHooks bool) error {
-	if !merge {
+// copyOrMergeFile copies src to dst, using the known config format's merge
+// behavior when both source and destination exist. Claude settings normalize
+// bare hook entries as part of their JSON merge.
+func copyOrMergeFile(src, dst, relPath string) error {
+	if isKimiConfigPath(relPath) {
+		return mergeKimiConfigFile(src, dst)
+	}
+	if !IsJSONMergeablePath(relPath) {
 		return copyFile(src, dst)
 	}
+	wrapBareHooks := WrapsBareHooks(relPath)
 	// Only merge if destination already exists.
 	dstInfo, dstErr := os.Stat(dst)
 	if dstErr != nil {
@@ -395,6 +398,39 @@ func copyOrMergeFile(src, dst string, merge, wrapBareHooks bool) error {
 		return fmt.Errorf("creating parent for %q: %w", dst, err)
 	}
 	// Preserve the destination file's permissions.
+	return os.WriteFile(dst, merged, dstInfo.Mode().Perm())
+}
+
+func mergeKimiConfigFile(src, dst string) error {
+	dstInfo, statErr := os.Stat(dst)
+	if os.IsNotExist(statErr) {
+		return copyFile(src, dst)
+	}
+	if statErr != nil {
+		return fmt.Errorf("stat existing Kimi config %q: %w", dst, statErr)
+	}
+	if dstInfo.IsDir() {
+		return fmt.Errorf("existing Kimi config %q is a directory", dst)
+	}
+
+	existing, err := os.ReadFile(dst)
+	if err != nil {
+		return fmt.Errorf("reading existing Kimi config %q: %w", dst, err)
+	}
+	overlayData, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("reading Kimi config overlay %q: %w", src, err)
+	}
+	merged, err := MergeKimiConfigTOML(existing, overlayData)
+	if err != nil {
+		return fmt.Errorf("merging Kimi config %q: %w", dst, err)
+	}
+	if bytes.Equal(existing, merged) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("creating parent for %q: %w", dst, err)
+	}
 	return os.WriteFile(dst, merged, dstInfo.Mode().Perm())
 }
 

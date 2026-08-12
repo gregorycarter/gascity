@@ -28,7 +28,9 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/convergence"
 	"github.com/gastownhall/gascity/internal/execenv"
+	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/materialize"
+	"github.com/gastownhall/gascity/internal/overlay"
 	"github.com/gastownhall/gascity/internal/processenv"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
@@ -187,14 +189,15 @@ func resolveTemplate(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName 
 	default:
 		return TemplateParams{}, fmt.Errorf("agent %q: unknown session transport %q", qualifiedName, sessionTransport)
 	}
+	defaultArgs := resolved.ResolveDefaultArgs()
 	providerFamily := resolvedProviderLaunchFamily(resolved)
 	installHooks := config.ResolveInstallHooks(cfgAgent, p.workspace)
-	if providerFamily == "kimi" && installHooksIncludeFamily(installHooks, "kimi", p.providers) {
+	if providerFamily == "kimi" && installHooksIncludeFamily(installHooks, "kimi", p.providers) && hasKimiHookLaunchConfig(p.fs, workDir, kimiLaunchModel(command, defaultArgs)) {
 		command = appendKimiHookConfigArg(command)
 	}
 	// Append schema-derived default args (e.g., --dangerously-skip-permissions
 	// from EffectiveDefaults["permission_mode"] = "unrestricted").
-	if defaultArgs := resolved.ResolveDefaultArgs(); len(defaultArgs) > 0 {
+	if len(defaultArgs) > 0 {
 		command = command + " " + shellquote.Join(defaultArgs)
 	}
 	sa, err := ensureClaudeSettingsArgs(p.fs, p.cityPath, providerFamily, p.stderr)
@@ -766,6 +769,35 @@ func appendKimiHookConfigArg(command string) string {
 	}
 	parts = append(parts, configArgs...)
 	return shellquote.Join(parts)
+}
+
+// hasKimiHookLaunchConfig reports whether the workdir config contains the
+// provider/model mapping required by Kimi when --config-file replaces its
+// default config. A hooks-only overlay is deliberately not eligible.
+func hasKimiHookLaunchConfig(fs fsys.FS, workDir, selectedModel string) bool {
+	if fs == nil || workDir == "" {
+		return false
+	}
+	data, err := fs.ReadFile(filepath.Join(workDir, ".kimi", "config.toml"))
+	return err == nil && overlay.KimiConfigHasLaunchModel(data, selectedModel)
+}
+
+// kimiLaunchModel returns the model actually selected by a Kimi launch
+// command. Provider option defaults are only represented on the command line
+// when their schema choice has flag arguments, so EffectiveDefaults alone is
+// not sufficient here.
+func kimiLaunchModel(command string, defaultArgs []string) string {
+	args := append(shellquote.Split(command), defaultArgs...)
+	var model string
+	for index, arg := range args {
+		switch {
+		case (arg == "--model" || arg == "-m") && index+1 < len(args):
+			model = args[index+1]
+		case strings.HasPrefix(arg, "--model="):
+			model = strings.TrimPrefix(arg, "--model=")
+		}
+	}
+	return strings.TrimSpace(model)
 }
 
 func suppressStartupPromptForAgent(cfgAgent *config.Agent) bool {

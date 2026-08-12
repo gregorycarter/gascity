@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// HashHookSettingsContent canonicalizes JSON only for overlay.IsMergeablePath
+// HashHookSettingsContent canonicalizes JSON only for overlay.IsJSONMergeablePath
 // files, so that a compact document and its pretty-printed equivalent produce
 // the same fingerprint. Everything else — non-mergeable paths, non-JSON bodies,
 // unreadable/missing files — must fall back to raw HashPathContent.

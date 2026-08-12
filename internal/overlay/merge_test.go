@@ -17,6 +17,7 @@ func TestIsMergeablePath(t *testing.T) {
 		{".codex/hooks.json", true},
 		{".cursor/hooks.json", true},
 		{".github/hooks/gascity.json", true},
+		{".kimi/config.toml", true},
 		// Negative cases.
 		{".claude/settings.local.json", false},
 		{".opencode/config.js", false},
@@ -28,6 +29,9 @@ func TestIsMergeablePath(t *testing.T) {
 		if got := IsMergeablePath(tt.path); got != tt.want {
 			t.Errorf("IsMergeablePath(%q) = %v, want %v", tt.path, got, tt.want)
 		}
+	}
+	if IsJSONMergeablePath(".kimi/config.toml") {
+		t.Error("Kimi TOML config must use its TOML merger, not the JSON merger")
 	}
 }
 
@@ -294,6 +298,17 @@ func TestMergeSettingsJSON_InvalidOverlay(t *testing.T) {
 	_, err := MergeSettingsJSON([]byte(`{}`), []byte(`not json`))
 	if err == nil {
 		t.Error("expected error for invalid overlay JSON")
+	}
+}
+
+func TestMergeKimiConfigTOMLRejectsInvalidBase(t *testing.T) {
+	_, err := MergeKimiConfigTOML([]byte("not valid = ["), []byte(`
+[[hooks]]
+event = "SessionStart"
+command = "python3 .kimi/hooks/gascity-session-start.py"
+`))
+	if err == nil {
+		t.Fatal("expected invalid existing Kimi config to fail instead of being overwritten")
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 
 // HashHookSettingsContent returns a content hash for a probed hook/settings
 // file that is stable across JSON serialization differences. For reconciler-owned
-// mergeable settings files (overlay.IsMergeablePath — .gemini/settings.json,
+// JSON mergeable settings files (overlay.IsJSONMergeablePath — .gemini/settings.json,
 // .codex/hooks.json, etc.) it hashes the canonical JSON form, so a compact
 // document and its pretty-printed equivalent fingerprint identically.
 //
@@ -23,10 +23,11 @@ import (
 // overlay staging (StageProviderOverlayDir → MergeSettingsJSON) or hooks.Install.
 // Without canonicalization the pre-fingerprint probe could hash a raw
 // non-canonical document on one tick and its canonical rewrite on the next,
-// producing spurious core-fingerprint drift. Non-mergeable paths, unreadable
-// files, and non-JSON content fall back to raw content hashing (HashPathContent).
+// producing spurious core-fingerprint drift. Paths without JSON canonicalization
+// (including Kimi's TOML config), unreadable files, and non-JSON content fall
+// back to raw content hashing (HashPathContent).
 func HashHookSettingsContent(path, relPath string) string {
-	if overlay.IsMergeablePath(relPath) {
+	if overlay.IsJSONMergeablePath(relPath) {
 		if data, err := os.ReadFile(path); err == nil {
 			if canon, cErr := overlay.CanonicalJSON(data); cErr == nil {
 				sum := sha256.Sum256(canon)

@@ -1263,39 +1263,99 @@ func TestStageHookFilesIncludesKimiHooks(t *testing.T) {
 	}
 }
 
-func TestResolveTemplateAddsKimiHookConfigArgWhenHooksInstalled(t *testing.T) {
+func TestResolveTemplateUsesKimiHookConfigOnlyWhenItHasLLM(t *testing.T) {
+	fullKimiConfig := `
+default_model = "kimi-code/k3"
+
+[providers.kimi]
+type = "kimi"
+base_url = "https://api.kimi.example/v1"
+api_key = "test-key"
+
+[models."kimi-code/k3"]
+provider = "kimi"
+model = "kimi-code/k3"
+max_context_size = 128000
+`
+	hooksOnlyConfig := `
+[[hooks]]
+event = "SessionStart"
+command = "python3 .kimi/hooks/gascity-session-start.py"
+`
+	modelSelectedConfig := `
+[providers.kimi]
+type = "kimi"
+base_url = "https://api.kimi.example/v1"
+api_key = "test-key"
+
+[models."kimi-k2-thinking-turbo"]
+provider = "kimi"
+model = "kimi-k2-thinking-turbo"
+max_context_size = 128000
+`
 	tests := []struct {
 		name           string
 		session        string
 		optionDefaults map[string]string
+		config         string
 		wantCommand    string
 	}{
 		{
-			name:        "tmux without provider option",
+			name:        "tmux uses complete projected config",
 			session:     config.SessionTransportTmux,
+			config:      fullKimiConfig,
 			wantCommand: "kimi --yolo --no-thinking --config-file .kimi/config.toml",
 		},
 		{
-			name:           "tmux with provider option",
+			name:           "tmux omits config when selected model is absent from it",
 			session:        config.SessionTransportTmux,
 			optionDefaults: map[string]string{"model": "kimi-k2-thinking-turbo"},
-			wantCommand:    "kimi --yolo --no-thinking --config-file .kimi/config.toml --model kimi-k2-thinking-turbo",
+			config:         fullKimiConfig,
+			wantCommand:    "kimi --yolo --no-thinking --model kimi-k2-thinking-turbo",
 		},
 		{
-			name:        "acp without provider option",
+			name:        "acp uses complete projected config",
 			session:     config.SessionTransportACP,
+			config:      fullKimiConfig,
 			wantCommand: "kimi --yolo --no-thinking --config-file .kimi/config.toml acp",
 		},
 		{
-			name:           "acp with provider option",
+			name:           "acp omits config when selected model is absent from it",
 			session:        config.SessionTransportACP,
 			optionDefaults: map[string]string{"model": "kimi-k2-thinking-turbo"},
-			wantCommand:    "kimi --yolo --no-thinking --config-file .kimi/config.toml acp --model kimi-k2-thinking-turbo",
+			config:         fullKimiConfig,
+			wantCommand:    "kimi --yolo --no-thinking acp --model kimi-k2-thinking-turbo",
+		},
+		{
+			name:        "tmux leaves hooks-only config to Kimi default",
+			session:     config.SessionTransportTmux,
+			config:      hooksOnlyConfig,
+			wantCommand: "kimi --yolo --no-thinking",
+		},
+		{
+			name:           "tmux uses explicitly selected configured model without default model",
+			session:        config.SessionTransportTmux,
+			optionDefaults: map[string]string{"model": "kimi-k2-thinking-turbo"},
+			config:         modelSelectedConfig,
+			wantCommand:    "kimi --yolo --no-thinking --config-file .kimi/config.toml --model kimi-k2-thinking-turbo",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cityDir := t.TempDir()
+			if tt.config != "" {
+				configPath := filepath.Join(cityDir, ".kimi", "config.toml")
+				if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+					t.Fatalf("MkdirAll Kimi config dir: %v", err)
+				}
+				if err := os.WriteFile(configPath, []byte(tt.config), 0o600); err != nil {
+					t.Fatalf("WriteFile Kimi config: %v", err)
+				}
+			}
+			var sessionProvider runtime.Provider = runtime.NewFake()
+			if tt.session == config.SessionTransportACP {
+				sessionProvider = &transportCapableSessionProvider{Fake: runtime.NewFake()}
+			}
 			cfgAgent := &config.Agent{
 				Name:              "worker",
 				Provider:          "kimi",
@@ -1310,19 +1370,78 @@ func TestResolveTemplateAddsKimiHookConfigArgWhenHooksInstalled(t *testing.T) {
 				providers:  config.BuiltinProviders(),
 				lookPath:   func(name string) (string, error) { return "/bin/" + name, nil },
 				fs:         fsys.OSFS{},
+				sp:         sessionProvider,
 				rigs:       []config.Rig{},
 				beaconTime: time.Unix(0, 0),
 				beadNames:  make(map[string]string),
 				stderr:     io.Discard,
 			}
 
-			tp, err := resolveTemplate(bp, cfgAgent, "worker", nil)
+			tp, err := resolveTemplatePrepared(bp, cfgAgent, "worker", nil)
 			if err != nil {
-				t.Fatalf("resolveTemplate: %v", err)
+				t.Fatalf("resolveTemplatePrepared: %v", err)
 			}
 
 			if tp.Command != tt.wantCommand {
 				t.Fatalf("Command = %q, want %q", tp.Command, tt.wantCommand)
+			}
+			if tt.config == fullKimiConfig {
+				data, err := os.ReadFile(filepath.Join(cityDir, ".kimi", "config.toml"))
+				if err != nil {
+					t.Fatalf("ReadFile merged Kimi config: %v", err)
+				}
+				for _, want := range []string{`default_model = "kimi-code/k3"`, `api_key = "test-key"`} {
+					if !strings.Contains(string(data), want) {
+						t.Fatalf("merged Kimi config lost %q:\n%s", want, data)
+					}
+				}
+				if count := strings.Count(string(data), "gascity-session-start.py"); count != 1 {
+					t.Fatalf("managed Kimi SessionStart hooks = %d, want 1:\n%s", count, data)
+				}
+			}
+		})
+	}
+}
+
+func TestKimiLaunchModel(t *testing.T) {
+	tests := []struct {
+		name        string
+		command     string
+		defaultArgs []string
+		want        string
+	}{
+		{
+			name:    "model flag in command",
+			command: "kimi --yolo --model kimi-k2.6",
+			want:    "kimi-k2.6",
+		},
+		{
+			name:    "short model flag in command",
+			command: "kimi -m kimi-k2.6",
+			want:    "kimi-k2.6",
+		},
+		{
+			name:    "equals model flag in command",
+			command: "kimi --model=kimi-k2.6",
+			want:    "kimi-k2.6",
+		},
+		{
+			name:        "schema default overrides command model",
+			command:     "kimi --model kimi-k2.6",
+			defaultArgs: []string{"--model", "kimi-k2-thinking-turbo"},
+			want:        "kimi-k2-thinking-turbo",
+		},
+		{
+			name:    "no model flag",
+			command: "kimi --yolo",
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := kimiLaunchModel(tt.command, tt.defaultArgs); got != tt.want {
+				t.Fatalf("kimiLaunchModel(%q, %v) = %q, want %q", tt.command, tt.defaultArgs, got, tt.want)
 			}
 		})
 	}

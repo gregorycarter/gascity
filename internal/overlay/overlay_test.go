@@ -3,9 +3,13 @@ package overlay
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestCopyDir_RecursiveCopy(t *testing.T) {
@@ -281,6 +285,72 @@ func TestCopyDir_MergesSettingsJSON(t *testing.T) {
 		if _, ok := hooks[cat]; !ok {
 			t.Errorf("missing category %q after merge", cat)
 		}
+	}
+}
+
+func TestCopyDirForProviders_MergesKimiConfigTOML(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	writeFile(t, filepath.Join(src, "per-provider", "kimi", ".kimi", "config.toml"), `
+[[hooks]]
+event = "SessionStart"
+command = "python3 .kimi/hooks/gascity-session-start.py"
+timeout = 30
+`)
+	writeFile(t, filepath.Join(dst, ".kimi", "config.toml"), `
+default_model = "kimi-code/k3"
+
+[providers.kimi]
+base_url = "https://api.kimi.example/v1"
+
+[models.k3]
+provider = "kimi"
+model = "kimi-code/k3"
+
+[[hooks]]
+event = "Stop"
+command = "custom-stop"
+`)
+
+	if err := CopyDirForProviders(src, dst, []string{"kimi"}, io.Discard); err != nil {
+		t.Fatalf("CopyDirForProviders: %v", err)
+	}
+	if err := CopyDirForProviders(src, dst, []string{"kimi"}, io.Discard); err != nil {
+		t.Fatalf("second CopyDirForProviders: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dst, ".kimi", "config.toml"))
+	if err != nil {
+		t.Fatalf("ReadFile merged Kimi config: %v", err)
+	}
+	for _, want := range []string{
+		`default_model = "kimi-code/k3"`,
+		`base_url = "https://api.kimi.example/v1"`,
+		`model = "kimi-code/k3"`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("merged Kimi config lost %q:\n%s", want, data)
+		}
+	}
+
+	var config struct {
+		Hooks []struct {
+			Event   string `toml:"event"`
+			Command string `toml:"command"`
+		} `toml:"hooks"`
+	}
+	if _, err := toml.Decode(string(data), &config); err != nil {
+		t.Fatalf("merged Kimi config is invalid TOML: %v\n%s", err, data)
+	}
+	var managedHookCount int
+	for _, hook := range config.Hooks {
+		if hook.Event == "SessionStart" && hook.Command == "python3 .kimi/hooks/gascity-session-start.py" {
+			managedHookCount++
+		}
+	}
+	if managedHookCount != 1 {
+		t.Fatalf("managed Kimi SessionStart hooks = %d, want 1:\n%s", managedHookCount, data)
 	}
 }
 

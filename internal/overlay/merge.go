@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 )
 
-// mergeablePaths is the set of relative paths that get JSON-level merge
+// jsonMergeablePaths is the set of relative paths that get JSON-level merge
 // instead of file-level overwrite when both base and overlay exist.
-var mergeablePaths = map[string]bool{
+var jsonMergeablePaths = map[string]bool{
 	filepath.Join(".agents", "hooks.json"):            true,
 	filepath.Join(".claude", "settings.json"):         true,
 	filepath.Join(".gemini", "settings.json"):         true,
@@ -43,10 +43,16 @@ func IsOverlayObjectShapeError(err error) bool {
 	return errors.Is(err, errOverlayNotObject)
 }
 
-// IsMergeablePath reports whether relPath is a known settings/hooks file
-// that should be JSON-merged rather than overwritten.
+// IsMergeablePath reports whether relPath is a known settings/hooks file that
+// needs format-aware merging rather than file-level overwrite.
 func IsMergeablePath(relPath string) bool {
-	return mergeablePaths[filepath.Clean(relPath)]
+	return IsJSONMergeablePath(relPath) || isKimiConfigPath(relPath)
+}
+
+// IsJSONMergeablePath reports whether relPath is a known JSON settings/hooks
+// file that should be JSON-merged rather than overwritten.
+func IsJSONMergeablePath(relPath string) bool {
+	return jsonMergeablePaths[filepath.Clean(relPath)]
 }
 
 // WrapsBareHooks reports whether relPath is a settings file that requires

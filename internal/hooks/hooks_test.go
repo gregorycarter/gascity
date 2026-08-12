@@ -1893,6 +1893,42 @@ func TestInstallOverlayManagedProviders(t *testing.T) {
 	}
 }
 
+func TestInstallKimiMergesExistingConfig(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/work/.kimi/config.toml"] = []byte(`
+hooks = []
+default_model = "kimi-code/k3"
+
+[providers.kimi]
+base_url = "https://api.kimi.example/v1"
+
+[models.k3]
+provider = "kimi"
+model = "kimi-code/k3"
+`)
+
+	if err := Install(fs, "/city", "/work", []string{"kimi"}); err != nil {
+		t.Fatalf("Install kimi hooks: %v", err)
+	}
+	if err := Install(fs, "/city", "/work", []string{"kimi"}); err != nil {
+		t.Fatalf("second Install kimi hooks: %v", err)
+	}
+
+	config := string(fs.Files["/work/.kimi/config.toml"])
+	for _, want := range []string{
+		`default_model = "kimi-code/k3"`,
+		`base_url = "https://api.kimi.example/v1"`,
+		`model = "kimi-code/k3"`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("Kimi hook installation lost %q:\n%s", want, config)
+		}
+	}
+	if count := strings.Count(config, "gascity-session-start.py"); count != 1 {
+		t.Fatalf("managed Kimi SessionStart hook occurrences = %d, want 1:\n%s", count, config)
+	}
+}
+
 func TestInstallAntigravityMergesExistingHooks(t *testing.T) {
 	fs := fsys.NewFake()
 	fs.Files["/work/.agents/hooks.json"] = []byte(`{

@@ -198,7 +198,10 @@ func installOverlayManaged(fs fsys.FS, cityDir, workDir, provider string) error 
 		if provider == "codex" && rel == path.Join(".codex", "hooks.json") {
 			return writeCodexHooksManaged(fs, cityDir, dst, data)
 		}
-		if overlay.IsMergeablePath(filepath.FromSlash(rel)) {
+		if provider == "kimi" && rel == path.Join(".kimi", "config.toml") {
+			return writeKimiConfigManaged(fs, dst, data)
+		}
+		if overlay.IsJSONMergeablePath(filepath.FromSlash(rel)) {
 			if normalized, normErr := overlay.CanonicalJSON(data); normErr == nil {
 				data = normalized
 			}
@@ -222,6 +225,23 @@ func writeJSONOverlayManaged(fs fsys.FS, dst string, data []byte) error {
 	}
 	if normalized, err := overlay.CanonicalJSON(data); err == nil {
 		data = normalized
+	}
+	return writeManagedData(fs, dst, data)
+}
+
+func writeKimiConfigManaged(fs fsys.FS, dst string, data []byte) error {
+	if existing, err := fs.ReadFile(dst); err == nil {
+		merged, mergeErr := overlay.MergeKimiConfigTOML(existing, data)
+		if mergeErr != nil {
+			return fmt.Errorf("merging %s: %w", dst, mergeErr)
+		}
+		if bytes.Equal(merged, existing) {
+			return nil
+		}
+		return writeManagedData(fs, dst, merged)
+	} else if _, statErr := fs.Stat(dst); statErr == nil {
+		// File exists but isn't readable. Preserve it rather than clobbering it.
+		return nil
 	}
 	return writeManagedData(fs, dst, data)
 }
