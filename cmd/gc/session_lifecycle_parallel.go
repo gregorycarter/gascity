@@ -1232,7 +1232,7 @@ func applySchemaOptionOverridesForLaunch(agentCfg *runtime.Config, tp *TemplateP
 		return
 	}
 	if len(args) > 0 {
-		agentCfg.Command = replaceSchemaFlags(agentCfg.Command, resolved.OptionsSchema, args)
+		agentCfg.Command = replaceSchemaFlagsForTemplate(agentCfg.Command, *tp, args)
 	}
 	if command, err := config.BuildProviderResumeCommand(resolved, overrides); err == nil && strings.TrimSpace(command) != "" {
 		dup := *resolved

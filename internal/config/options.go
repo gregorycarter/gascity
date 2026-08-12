@@ -321,12 +321,59 @@ func assignmentPrefix(token string) (string, bool) {
 // ReplaceSchemaFlags strips all CLI flags associated with the provider's
 // OptionsSchema from the command, then appends the given override flags.
 func ReplaceSchemaFlags(command string, schema []ProviderOption, overrideArgs []string) string {
-	allFlags := CollectAllSchemaFlags(schema)
-	stripped := StripFlags(command, allFlags)
-	if len(overrideArgs) > 0 {
-		stripped = stripped + " " + shellquote.Join(overrideArgs)
+	return ReplaceSchemaFlagsBeforeSubcommand(command, schema, overrideArgs, "")
+}
+
+// ReplaceSchemaFlagsBeforeSubcommand strips all CLI flags associated with the
+// provider's OptionsSchema from the command, then inserts the given override
+// flags immediately before the first standalone occurrence of subcommand.
+//
+// Providers whose schema-managed options are *global* options of the parent
+// CLI declare that token (ProviderSpec.ACPSubcommand): appending after it
+// hands the flags to the subcommand's parser, which rejects them. When
+// subcommand is empty, or is not a standalone token in the stripped command,
+// the flags are appended at the end.
+func ReplaceSchemaFlagsBeforeSubcommand(command string, schema []ProviderOption, overrideArgs []string, subcommand string) string {
+	stripped := StripFlags(command, CollectAllSchemaFlags(schema))
+	return InsertArgsBeforeSubcommand(stripped, overrideArgs, subcommand)
+}
+
+// InsertArgsBeforeSubcommand splices args into command immediately before the
+// first standalone occurrence of subcommand, so that options the parent CLI
+// parses globally never land after the token that hands parsing to a
+// subcommand. When subcommand is empty, or no token matches it, args are
+// appended at the end.
+func InsertArgsBeforeSubcommand(command string, args []string, subcommand string) string {
+	if len(args) == 0 {
+		return command
 	}
-	return stripped
+	if spliced, ok := spliceArgsBeforeSubcommand(command, args, subcommand); ok {
+		return spliced
+	}
+	return command + " " + shellquote.Join(args)
+}
+
+// spliceArgsBeforeSubcommand inserts args immediately before the first
+// standalone occurrence of subcommand, reporting whether that token was found.
+// A false return means the caller keeps its own append form: the token may be
+// absent entirely, or quoted inside a larger token by a shell wrapper that
+// owns placement itself.
+func spliceArgsBeforeSubcommand(command string, args []string, subcommand string) (string, bool) {
+	if subcommand == "" || len(args) == 0 {
+		return command, false
+	}
+	tokens := shellquote.Split(command)
+	for i, token := range tokens {
+		if token != subcommand {
+			continue
+		}
+		out := make([]string, 0, len(tokens)+len(args))
+		out = append(out, tokens[:i]...)
+		out = append(out, args...)
+		out = append(out, tokens[i:]...)
+		return shellquote.Join(out), true
+	}
+	return command, false
 }
 
 // CollectAllSchemaFlags gathers all FlagArgs and FlagAliases from all choices

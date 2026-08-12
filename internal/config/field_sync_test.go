@@ -496,6 +496,7 @@ func TestProviderFieldSync(t *testing.T) {
 		"ForkFlag":                  "internal fork-launch config (claude-only), not patched",
 		"PrintArgs":                 "internal print-mode args, not patched",
 		"TitleModel":                "internal title-model key, not patched",
+		"ACPSubcommand":             "internal ACP launch composition (twin of ResumeStyle), not patched directly (use acp_command/acp_args)",
 	}
 
 	// Fields on ProviderPatch that don't map 1:1 to ProviderSpec.

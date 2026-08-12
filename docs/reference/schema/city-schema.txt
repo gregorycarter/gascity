@@ -2508,6 +2508,10 @@
           },
           "type": "array",
           "description": "ACPArgs overrides Args when the session transport is ACP.\nWhen nil, Args is used for both tmux and ACP transports."
+        },
+        "acp_subcommand": {
+          "type": "string",
+          "description": "ACPSubcommand names the subcommand token that starts ACP mode in the\ncomposed ACP command (e.g. \"acp\" in `kimi --yolo acp`). Schema-managed\noption flags and the provider-owned settings flag are global options of\nthe parent CLI, so they are inserted immediately *before* that token\ninstead of appended at the end, where the subcommand's own parser would\nreject them. Empty means flags append at the end (the default), which is\ncorrect for providers that enter ACP via a flag or accept their options\nafter the subcommand. When the token is not a standalone word in the\ncommand — a shell trampoline such as `sh -c '... acp' --` quotes it into\na larger token — flags append at the end as well, because the wrapper\nowns placement."
         }
       },
       "additionalProperties": false,

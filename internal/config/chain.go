@@ -407,6 +407,7 @@ func recordScalarProvenance(spec ProviderSpec, layer string, into map[string]str
 	set("fork_flag", spec.ForkFlag)
 	set("acp_command", spec.ACPCommand)
 	setSlice("acp_args", spec.ACPArgs)
+	set("acp_subcommand", spec.ACPSubcommand)
 	set("title_model", spec.TitleModel)
 	set("options_schema_merge", spec.OptionsSchemaMerge)
 	setSlice("print_args", spec.PrintArgs)

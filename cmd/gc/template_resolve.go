@@ -189,23 +189,29 @@ func resolveTemplate(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName 
 	default:
 		return TemplateParams{}, fmt.Errorf("agent %q: unknown session transport %q", qualifiedName, sessionTransport)
 	}
+	// Every flag composed below is a global option of the launched CLI. A
+	// provider that enters ACP through a subcommand declares that token, and
+	// those flags go before it: the subcommand's own parser rejects them
+	// (kimi 1.49 fails `kimi acp --model ...`). Empty — the default, and every
+	// non-ACP launch — keeps the historical trailing placement.
+	acpSubcommand := launchACPSubcommand(resolved, sessionTransport)
 	defaultArgs := resolved.ResolveDefaultArgs()
 	providerFamily := resolvedProviderLaunchFamily(resolved)
 	installHooks := config.ResolveInstallHooks(cfgAgent, p.workspace)
 	if providerFamily == "kimi" && installHooksIncludeFamily(installHooks, "kimi", p.providers) && hasKimiHookLaunchConfig(p.fs, workDir, kimiLaunchModel(command, defaultArgs)) {
-		command = appendKimiHookConfigArg(command)
+		command = placeKimiHookConfigArg(command, acpSubcommand)
 	}
-	// Append schema-derived default args (e.g., --dangerously-skip-permissions
+	// Place schema-derived default args (e.g., --dangerously-skip-permissions
 	// from EffectiveDefaults["permission_mode"] = "unrestricted").
 	if len(defaultArgs) > 0 {
-		command = command + " " + shellquote.Join(defaultArgs)
+		command = config.InsertArgsBeforeSubcommand(command, defaultArgs, acpSubcommand)
 	}
 	sa, err := ensureClaudeSettingsArgs(p.fs, p.cityPath, providerFamily, p.stderr)
 	if err != nil {
 		return TemplateParams{}, fmt.Errorf("agent %q: %w", qualifiedName, err)
 	}
 	if sa != "" {
-		command = command + " " + sa
+		command = placeSettingsArgs(command, sa, acpSubcommand)
 		settingsFile, relDst := claudeSettingsSource(p.cityPath)
 		if settingsFile != "" {
 			// .gc/settings.json is managed by gc (regenerated on binary upgrade).
@@ -754,21 +760,32 @@ func installHooksIncludeFamily(installHooks []string, family string, providers m
 	return false
 }
 
-func appendKimiHookConfigArg(command string) string {
-	parts := shellquote.Split(command)
-	if len(parts) == 0 {
-		return command
+// launchACPSubcommand returns the subcommand token that global option flags
+// must precede for this launch, or "" when the launch is not ACP or the
+// provider does not declare one.
+func launchACPSubcommand(resolved *config.ResolvedProvider, sessionTransport string) string {
+	if resolved == nil || sessionTransport != config.SessionTransportACP {
+		return ""
 	}
-	configArgs := []string{"--config-file", ".kimi/config.toml"}
-	if parts[len(parts)-1] == "acp" {
-		withConfig := make([]string, 0, len(parts)+len(configArgs))
-		withConfig = append(withConfig, parts[:len(parts)-1]...)
-		withConfig = append(withConfig, configArgs...)
-		withConfig = append(withConfig, parts[len(parts)-1])
-		return shellquote.Join(withConfig)
+	return strings.TrimSpace(resolved.ACPSubcommand)
+}
+
+// placeKimiHookConfigArg points kimi at the projected hook config. --config-file
+// is a global option of the kimi CLI, so it goes before the ACP subcommand token
+// when the launch declares one.
+func placeKimiHookConfigArg(command, acpSubcommand string) string {
+	return config.InsertArgsBeforeSubcommand(command, []string{"--config-file", ".kimi/config.toml"}, acpSubcommand)
+}
+
+// placeSettingsArgs puts the provider-owned settings flag where the launched CLI
+// parses it. Without a declared subcommand the pre-quoted string is appended
+// verbatim rather than round-tripped through the tokenizer, which would rewrite
+// its quoting and churn the config fingerprint of every existing session.
+func placeSettingsArgs(command, settingsArgs, acpSubcommand string) string {
+	if acpSubcommand == "" {
+		return command + " " + settingsArgs
 	}
-	parts = append(parts, configArgs...)
-	return shellquote.Join(parts)
+	return config.InsertArgsBeforeSubcommand(command, shellquote.Split(settingsArgs), acpSubcommand)
 }
 
 // hasKimiHookLaunchConfig reports whether the workdir config contains the

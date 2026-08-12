@@ -5292,7 +5292,7 @@ func applyTemplateOverridesToConfigInfo(agentCfg *runtime.Config, info sessionpk
 	if err != nil || len(extra) == 0 {
 		return
 	}
-	agentCfg.Command = replaceSchemaFlags(agentCfg.Command, tp.ResolvedProvider.OptionsSchema, extra)
+	agentCfg.Command = replaceSchemaFlagsForTemplate(agentCfg.Command, tp, extra)
 }
 
 // namedSessionActiveUseReasonInfo is the session.Info sibling of

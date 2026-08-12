@@ -713,6 +713,7 @@ ProviderSpec defines a named provider's startup parameters.
 | `title_model` | string |  |  | TitleModel is the OptionsSchema model key used for title generation. Resolved via the "model" option in OptionsSchema to get FlagArgs. Defaults to the cheapest/fastest model for each provider. Examples: "haiku" (claude), "o4-mini" (codex), "gemini-2.5-flash" (gemini) |
 | `acp_command` | string |  |  | ACPCommand overrides Command when the session transport is ACP. When empty, Command is used for both tmux and ACP transports. |
 | `acp_args` | []string |  |  | ACPArgs overrides Args when the session transport is ACP. When nil, Args is used for both tmux and ACP transports. |
+| `acp_subcommand` | string |  |  | ACPSubcommand names the subcommand token that starts ACP mode in the composed ACP command (e.g. "acp" in `kimi --yolo acp`). Schema-managed option flags and the provider-owned settings flag are global options of the parent CLI, so they are inserted immediately *before* that token instead of appended at the end, where the subcommand's own parser would reject them. Empty means flags append at the end (the default), which is correct for providers that enter ACP via a flag or accept their options after the subcommand. When the token is not a standalone word in the command — a shell trampoline such as `sh -c '... acp' --` quotes it into a larger token — flags append at the end as well, because the wrapper owns placement. |
 
 ## Rig
 

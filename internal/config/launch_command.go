@@ -37,15 +37,16 @@ func BuildProviderLaunchCommand(cityPath string, resolved *ResolvedProvider, opt
 	}
 
 	command := providerLaunchBaseCommand(resolved, transport)
+	subcommand := providerLaunchSubcommand(resolved, transport)
 	if len(resolved.OptionsSchema) > 0 && hasProviderOptionValues(resolved, optionOverrides) {
 		mergedArgs, err := providerOptionArgs(resolved, optionOverrides)
 		if err != nil {
 			return ProviderLaunchCommand{}, err
 		}
-		command = ReplaceSchemaFlags(command, resolved.OptionsSchema, mergedArgs)
+		command = ReplaceSchemaFlagsBeforeSubcommand(command, resolved.OptionsSchema, mergedArgs, subcommand)
 	}
 
-	return appendProviderSettings(cityPath, providerSettingsFamily(resolved), command), nil
+	return appendProviderSettings(cityPath, providerSettingsFamily(resolved), command, subcommand), nil
 }
 
 // BuildProviderResumeCommand applies schema-managed option overrides to a
@@ -80,7 +81,12 @@ func BuildProviderLaunchCommandWithoutOptions(cityPath string, resolved *Resolve
 	if !IsValidSessionTransport(transport) {
 		return ProviderLaunchCommand{}, fmt.Errorf("unknown session transport %q", strings.TrimSpace(transport))
 	}
-	return appendProviderSettings(cityPath, providerSettingsFamily(resolved), providerLaunchBaseCommand(resolved, transport)), nil
+	return appendProviderSettings(
+		cityPath,
+		providerSettingsFamily(resolved),
+		providerLaunchBaseCommand(resolved, transport),
+		providerLaunchSubcommand(resolved, transport),
+	), nil
 }
 
 func providerLaunchBaseCommand(resolved *ResolvedProvider, transport string) string {
@@ -92,6 +98,16 @@ func providerLaunchBaseCommand(resolved *ResolvedProvider, transport string) str
 	default:
 		return resolved.CommandString()
 	}
+}
+
+// providerLaunchSubcommand returns the token that composed flags must precede
+// for this launch. Only the ACP transport composes a subcommand-style command,
+// so every other transport keeps append-at-the-end placement.
+func providerLaunchSubcommand(resolved *ResolvedProvider, transport string) string {
+	if strings.TrimSpace(transport) != SessionTransportACP {
+		return ""
+	}
+	return strings.TrimSpace(resolved.ACPSubcommand)
 }
 
 func providerOptionArgs(resolved *ResolvedProvider, optionOverrides map[string]string) ([]string, error) {
@@ -158,10 +174,18 @@ func unquoteSessionKeyTemplate(command string) string {
 	return strings.ReplaceAll(command, "'{{.SessionKey}}'", "{{.SessionKey}}")
 }
 
-func appendProviderSettings(cityPath, providerName, command string) ProviderLaunchCommand {
+func appendProviderSettings(cityPath, providerName, command, subcommand string) ProviderLaunchCommand {
 	settingsPath, settingsRel := ProviderSettingsSource(cityPath, providerName)
 	if settingsPath != "" {
-		command = command + " " + fmt.Sprintf("--settings %q", settingsPath)
+		// --settings is a global option like the schema-managed ones, so a
+		// provider that declares an ACP subcommand takes it before that token.
+		// Without one the command keeps its historical trailing form verbatim,
+		// rather than being re-quoted by a round trip through the tokenizer.
+		if placed, ok := spliceArgsBeforeSubcommand(command, []string{"--settings", settingsPath}, subcommand); ok {
+			command = placed
+		} else {
+			command = command + " " + fmt.Sprintf("--settings %q", settingsPath)
+		}
 	}
 
 	return ProviderLaunchCommand{

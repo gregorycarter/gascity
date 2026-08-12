@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gastownhall/gascity/internal/shellquote"
 )
 
 func TestBuildProviderLaunchCommandAddsDefaultsAndSettings(t *testing.T) {
@@ -256,4 +258,192 @@ func TestBuildProviderLaunchCommandWithoutOptionsIgnoresDeprecatedKindForSetting
 	if got.SettingsPath != "" || got.SettingsRel != "" {
 		t.Fatalf("unexpected settings source from deprecated Kind fallback: %#v", got)
 	}
+}
+
+// kimiCitySpec mirrors the live city's kimi provider: the builtin profile plus
+// the city-side options_schema that names the provisioned K3 / K2.7 model ids
+// and the thinking toggle. Every flag in that schema is a kimi *global*
+// option, which the `acp` subcommand rejects.
+func kimiCitySpec() ProviderSpec {
+	spec := BuiltinProviders()["kimi"]
+	spec.OptionsSchema = []ProviderOption{
+		{
+			Key:   "model",
+			Label: "Model",
+			Type:  "select",
+			Choices: []OptionChoice{
+				{Value: "k3", Label: "Kimi K3 (1M context)", FlagArgs: []string{"--model", "kimi-code/k3"}},
+				{Value: "k2.7-highspeed", Label: "Kimi K2.7 Coding Highspeed", FlagArgs: []string{"--model", "kimi-code/kimi-for-coding-highspeed"}},
+			},
+		},
+		{
+			Key:   "thinking",
+			Label: "Thinking",
+			Type:  "select",
+			Choices: []OptionChoice{
+				{Value: "on", Label: "Thinking enabled", FlagArgs: []string{"--thinking"}},
+				{Value: "off", Label: "Thinking disabled", FlagArgs: []string{"--no-thinking"}},
+			},
+		},
+	}
+	return spec
+}
+
+func TestBuildProviderLaunchCommandKeepsSchemaFlagsBeforeACPSubcommand(t *testing.T) {
+	spec := kimiCitySpec()
+	rp := specToResolved("kimi", &spec)
+
+	tests := []struct {
+		name      string
+		overrides map[string]string
+		want      string
+	}{
+		{
+			// The thinking=off default inferred from the provider's own
+			// --no-thinking arg is re-emitted alongside the override, so both
+			// global flags have to move ahead of the subcommand.
+			name:      "k3 model flag precedes the acp subcommand",
+			overrides: map[string]string{"model": "k3"},
+			want:      "kimi --yolo --model kimi-code/k3 --no-thinking acp",
+		},
+		{
+			name:      "k2.7-highspeed with thinking off precedes the acp subcommand",
+			overrides: map[string]string{"model": "k2.7-highspeed", "thinking": "off"},
+			want:      "kimi --yolo --model kimi-code/kimi-for-coding-highspeed --no-thinking acp",
+		},
+		{
+			name:      "thinking on precedes the acp subcommand",
+			overrides: map[string]string{"thinking": "on"},
+			want:      "kimi --yolo --thinking acp",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildProviderLaunchCommand("", rp, tt.overrides, SessionTransportACP)
+			if err != nil {
+				t.Fatalf("BuildProviderLaunchCommand: %v", err)
+			}
+			if got.Command != tt.want {
+				t.Fatalf("Command = %q, want %q", got.Command, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildProviderLaunchCommandZeroOptionACPLaunchKeepsModernHandshake pins
+// the no-option launch: nothing is inserted, and the command still ends in the
+// modern `acp` subcommand rather than the deprecated global --acp flag (which
+// kimi answers with an ACP invalid_params during initialize).
+func TestBuildProviderLaunchCommandZeroOptionACPLaunchKeepsModernHandshake(t *testing.T) {
+	spec := kimiCitySpec()
+	rp := specToResolved("kimi", &spec)
+
+	got, err := BuildProviderLaunchCommand("", rp, nil, SessionTransportACP)
+	if err != nil {
+		t.Fatalf("BuildProviderLaunchCommand: %v", err)
+	}
+	want := "kimi --yolo --no-thinking acp"
+	if got.Command != want {
+		t.Fatalf("Command = %q, want %q", got.Command, want)
+	}
+	if strings.Contains(got.Command, "--acp") {
+		t.Fatalf("Command = %q, want the modern acp subcommand, not the deprecated --acp flag", got.Command)
+	}
+}
+
+// TestBuildProviderLaunchCommandKeepsSettingsBeforeACPSubcommand pins the same
+// invariant for the provider-owned settings file: --settings is a global
+// option too, so it must land before the subcommand, not after it.
+func TestBuildProviderLaunchCommandKeepsSettingsBeforeACPSubcommand(t *testing.T) {
+	dir := t.TempDir()
+	runtimeDir := filepath.Join(dir, ".gc")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(runtimeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rp := &ResolvedProvider{
+		Name:          "claude",
+		Command:       "claude",
+		ACPArgs:       []string{"acp"},
+		ACPSubcommand: "acp",
+	}
+
+	t.Run("with options", func(t *testing.T) {
+		got, err := BuildProviderLaunchCommand(dir, rp, nil, SessionTransportACP)
+		if err != nil {
+			t.Fatalf("BuildProviderLaunchCommand: %v", err)
+		}
+		want := "claude --settings " + shellquote.Join([]string{settingsPath}) + " acp"
+		if got.Command != want {
+			t.Fatalf("Command = %q, want %q", got.Command, want)
+		}
+	})
+
+	t.Run("without options", func(t *testing.T) {
+		got, err := BuildProviderLaunchCommandWithoutOptions(dir, rp, SessionTransportACP)
+		if err != nil {
+			t.Fatalf("BuildProviderLaunchCommandWithoutOptions: %v", err)
+		}
+		want := "claude --settings " + shellquote.Join([]string{settingsPath}) + " acp"
+		if got.Command != want {
+			t.Fatalf("Command = %q, want %q", got.Command, want)
+		}
+		if got.SettingsPath != settingsPath {
+			t.Fatalf("SettingsPath = %q, want %q", got.SettingsPath, settingsPath)
+		}
+	})
+}
+
+// TestBuildProviderLaunchCommandACPSubcommandLeavesOtherPathsAlone pins the
+// blast radius: the placement rule only fires for the ACP transport, and only
+// when the declared subcommand is a standalone token in the composed command.
+func TestBuildProviderLaunchCommandACPSubcommandLeavesOtherPathsAlone(t *testing.T) {
+	t.Run("tmux transport appends as before", func(t *testing.T) {
+		spec := kimiCitySpec()
+		rp := specToResolved("kimi", &spec)
+
+		got, err := BuildProviderLaunchCommand("", rp, map[string]string{"model": "k3"}, SessionTransportTmux)
+		if err != nil {
+			t.Fatalf("BuildProviderLaunchCommand: %v", err)
+		}
+		want := "kimi --yolo --model kimi-code/k3 --no-thinking"
+		if got.Command != want {
+			t.Fatalf("Command = %q, want %q", got.Command, want)
+		}
+	})
+
+	t.Run("shell trampoline without a standalone token appends as before", func(t *testing.T) {
+		spec := kimiCitySpec()
+		spec.ACPCommand = `sh -c 'exec kimi --yolo "$@" acp' --`
+		spec.ACPArgs = []string{}
+		rp := specToResolved("kimi", &spec)
+
+		got, err := BuildProviderLaunchCommand("", rp, map[string]string{"model": "k3"}, SessionTransportACP)
+		if err != nil {
+			t.Fatalf("BuildProviderLaunchCommand: %v", err)
+		}
+		want := `sh -c 'exec kimi --yolo "$@" acp' -- --model kimi-code/k3 --no-thinking`
+		if got.Command != want {
+			t.Fatalf("Command = %q, want %q", got.Command, want)
+		}
+	})
+
+	t.Run("provider without a declared subcommand appends as before", func(t *testing.T) {
+		spec := kimiCitySpec()
+		spec.ACPSubcommand = ""
+		rp := specToResolved("kimi", &spec)
+
+		got, err := BuildProviderLaunchCommand("", rp, map[string]string{"model": "k3"}, SessionTransportACP)
+		if err != nil {
+			t.Fatalf("BuildProviderLaunchCommand: %v", err)
+		}
+		want := "kimi --yolo acp --model kimi-code/k3 --no-thinking"
+		if got.Command != want {
+			t.Fatalf("Command = %q, want %q", got.Command, want)
+		}
+	})
 }

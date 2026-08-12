@@ -326,6 +326,9 @@ func MergeProviderOverBuiltin(base, city ProviderSpec) ProviderSpec {
 	if city.ACPCommand != "" {
 		result.ACPCommand = city.ACPCommand
 	}
+	if city.ACPSubcommand != "" {
+		result.ACPSubcommand = city.ACPSubcommand
+	}
 
 	// Slice fields: replace entirely when non-nil.
 	if city.Args != nil {
@@ -641,6 +644,7 @@ func specToResolved(name string, spec *ProviderSpec) *ResolvedProvider {
 		ForkFlag:                  spec.ForkFlag,
 		TitleModel:                spec.TitleModel,
 		ACPCommand:                spec.ACPCommand,
+		ACPSubcommand:             spec.ACPSubcommand,
 		UpstreamEnv:               spec.UpstreamEnv,
 	}
 	// Deep-copy OptionsSchema to avoid aliasing the spec's slice.
@@ -885,6 +889,9 @@ func resolvedChainToSpec(r ResolvedProvider, leaf ProviderSpec) ProviderSpec {
 	if r.ACPArgs != nil {
 		out.ACPArgs = make([]string, len(r.ACPArgs))
 		copy(out.ACPArgs, r.ACPArgs)
+	}
+	if r.ACPSubcommand != "" {
+		out.ACPSubcommand = r.ACPSubcommand
 	}
 	if r.PrintArgs != nil {
 		out.PrintArgs = append([]string(nil), r.PrintArgs...)

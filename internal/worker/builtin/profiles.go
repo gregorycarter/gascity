@@ -67,6 +67,12 @@ type BuiltinProviderSpec struct {
 	TitleModel      string
 	ACPCommand      string
 	ACPArgs         []string
+	// ACPSubcommand names the subcommand token that starts ACP mode in ACPArgs
+	// (e.g. "acp" in `kimi --yolo acp`). Set it when the CLI takes the options
+	// gc manages as *global* options, which its ACP subcommand rejects: gc then
+	// composes them before the token instead of after it. Empty appends them at
+	// the end.
+	ACPSubcommand string
 	// Upstream serving-env binding (Phase C — the Upstream axis): the env-var
 	// NAMES this harness reads for the model-serving base URL and credential, so
 	// an abstract [upstreams.<name>] renders onto the right names for this CLI.
@@ -428,6 +434,11 @@ var builtinProviderSpecs = map[string]BuiltinProviderSpec{
 		PrintArgs:                 []string{"--quiet", "--prompt"},
 		TitleModel:                "kimi-k2.6",
 		ACPArgs:                   []string{"--yolo", "--no-thinking", "acp"},
+		// kimi 1.49 takes --model/--thinking/--config-file only as global
+		// options; `kimi acp --model ...` is a parse error, and the deprecated
+		// global --acp is no fallback (kimi answers ACP initialize with
+		// invalid_params). Compose managed flags before the subcommand.
+		ACPSubcommand: "acp",
 		OptionsSchema: []BuiltinProviderOption{
 			{
 				Key:   "model",

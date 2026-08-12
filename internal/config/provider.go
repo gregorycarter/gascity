@@ -178,6 +178,18 @@ type ProviderSpec struct {
 	// ACPArgs overrides Args when the session transport is ACP.
 	// When nil, Args is used for both tmux and ACP transports.
 	ACPArgs []string `toml:"acp_args,omitempty"`
+	// ACPSubcommand names the subcommand token that starts ACP mode in the
+	// composed ACP command (e.g. "acp" in `kimi --yolo acp`). Schema-managed
+	// option flags and the provider-owned settings flag are global options of
+	// the parent CLI, so they are inserted immediately *before* that token
+	// instead of appended at the end, where the subcommand's own parser would
+	// reject them. Empty means flags append at the end (the default), which is
+	// correct for providers that enter ACP via a flag or accept their options
+	// after the subcommand. When the token is not a standalone word in the
+	// command — a shell trampoline such as `sh -c '... acp' --` quotes it into
+	// a larger token — flags append at the end as well, because the wrapper
+	// owns placement.
+	ACPSubcommand string `toml:"acp_subcommand,omitempty"`
 }
 
 // Reserved prefixes for the Base field.
@@ -247,6 +259,7 @@ type ResolvedProvider struct {
 	TitleModel                string
 	ACPCommand                string
 	ACPArgs                   []string
+	ACPSubcommand             string
 	// EffectiveDefaults is the fully-merged option default map.
 	// Computed from: schema Default -> provider OptionDefaults -> agent OptionDefaults.
 	// Used by ResolveDefaultArgs() to produce CLI flags and by the API to
@@ -498,10 +511,11 @@ func providerSpecFromWorker(spec workerbuiltin.BuiltinProviderSpec) ProviderSpec
 			APIKey:    spec.UpstreamAPIKeyEnv,
 			AuthToken: spec.UpstreamAuthTokenEnv,
 		},
-		PrintArgs:  cloneStrings(spec.PrintArgs),
-		TitleModel: spec.TitleModel,
-		ACPCommand: spec.ACPCommand,
-		ACPArgs:    cloneStrings(spec.ACPArgs),
+		PrintArgs:     cloneStrings(spec.PrintArgs),
+		TitleModel:    spec.TitleModel,
+		ACPCommand:    spec.ACPCommand,
+		ACPArgs:       cloneStrings(spec.ACPArgs),
+		ACPSubcommand: spec.ACPSubcommand,
 	}
 }
 
