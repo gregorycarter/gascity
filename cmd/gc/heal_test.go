@@ -28,6 +28,19 @@ func (r *healCaptureRecorder) Record(e events.Event) {
 	r.events = append(r.events, e)
 }
 
+// healInProgressListFailStore simulates an unreadable in-progress work view
+// while leaving the unrelated ready and open views usable.
+type healInProgressListFailStore struct {
+	beads.Store
+}
+
+func (s healInProgressListFailStore) List(query beads.ListQuery) ([]beads.Bead, error) {
+	if query.Status == "in_progress" {
+		return nil, fmt.Errorf("in-progress work inventory unavailable")
+	}
+	return s.Store.List(query)
+}
+
 func (r *healCaptureRecorder) byType(eventType string) []events.Event {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -52,9 +65,10 @@ type healTestEnv struct {
 	attached map[string]bool
 	running  map[string]bool
 
-	landed    int
-	landedErr error
-	checkErr  error
+	landed     int
+	landedErr  error
+	checkErr   error
+	sessionErr error
 
 	killed  []string
 	started []string
@@ -97,7 +111,7 @@ func (env *healTestEnv) deps() healDeps {
 		CityStore: env.store,
 		RigStores: map[string]beads.Store{"demo": env.store},
 		ListOpenSessions: func() ([]session.Info, error) {
-			return env.sessions, nil
+			return env.sessions, env.sessionErr
 		},
 		Observe: func(target string) (worker.LiveObservation, error) {
 			running, ok := env.running[target]
@@ -231,6 +245,10 @@ func TestHealLeavesQueueAddressesAndFreshAndHeldWorkAlone(t *testing.T) {
 	queueOwned := env.createRouted(t, func(o *beads.UpdateOpts) {
 		o.Assignee = strPtr("demo/merge-queue")
 	})
+	queueInProgress := env.createRouted(t, func(o *beads.UpdateOpts) {
+		o.Status = strPtr("in_progress")
+		o.Assignee = strPtr("demo/merge-queue")
+	})
 	held := env.createRouted(t, func(o *beads.UpdateOpts) {
 		o.Assignee = strPtr("somewhere")
 		o.Labels = []string{"hold:mayor"}
@@ -244,6 +262,9 @@ func TestHealLeavesQueueAddressesAndFreshAndHeldWorkAlone(t *testing.T) {
 
 	if got := env.get(t, queueOwned.ID); got.Assignee != "demo/merge-queue" {
 		t.Errorf("queue-owned bead released: assignee=%q", got.Assignee)
+	}
+	if got := env.get(t, queueInProgress.ID); got.Status != "in_progress" || got.Assignee != "demo/merge-queue" {
+		t.Errorf("in-progress queue-owned bead changed: status=%q assignee=%q", got.Status, got.Assignee)
 	}
 	if got := env.get(t, held.ID); got.Assignee != "somewhere" {
 		t.Errorf("held bead released: assignee=%q", got.Assignee)
@@ -315,6 +336,49 @@ func TestHealMeasurementFailureFailsSafe(t *testing.T) {
 	}
 	if len(report.Errors) == 0 {
 		t.Error("measurement error not recorded in report")
+	}
+}
+
+func TestHealMissingTargetRigStoreFailsClosed(t *testing.T) {
+	env := newHealTestEnv(t)
+	env.landed = 0
+
+	orphan := env.createRouted(t, func(o *beads.UpdateOpts) {
+		o.Assignee = strPtr("coordinator-address")
+	})
+	deps := env.deps()
+	deps.RigStores = nil
+
+	report := runHealPass(deps)
+
+	if got := env.get(t, orphan.ID); got.Assignee != "coordinator-address" {
+		t.Fatalf("rig work changed after target store was unavailable: assignee=%q", got.Assignee)
+	}
+	if !strings.Contains(strings.Join(report.Errors, "\n"), "no bead store") {
+		t.Errorf("missing target store error absent from report: %v", report.Errors)
+	}
+}
+
+func TestHealUnreadableAuditLedgerFailsClosed(t *testing.T) {
+	env := newHealTestEnv(t)
+	env.landed = 0
+
+	orphan := env.createRouted(t, func(o *beads.UpdateOpts) {
+		o.Assignee = strPtr("coordinator-address")
+	})
+	deps := env.deps()
+	deps.Rec = events.Discard
+	deps.RecentActions = func(since time.Time) map[string]time.Time {
+		return healRecentActions(events.Discard, since)
+	}
+
+	report := runHealPass(deps)
+
+	if got := env.get(t, orphan.ID); got.Assignee != "coordinator-address" {
+		t.Fatalf("orphan released without a readable audit ledger: assignee=%q", got.Assignee)
+	}
+	if !strings.Contains(strings.Join(report.Errors, "\n"), "audit") {
+		t.Errorf("unreadable audit ledger missing from report: %v", report.Errors)
 	}
 }
 
@@ -390,6 +454,38 @@ func TestHealInversionWithoutIdleWorkerIsRecordedNotForced(t *testing.T) {
 	}
 }
 
+func TestHealBusyInventoryFailureDoesNotForceAssign(t *testing.T) {
+	env := newHealTestEnv(t)
+	env.landed = 0
+
+	p0 := env.createRouted(t, func(o *beads.UpdateOpts) {
+		zero := 0
+		o.Priority = &zero
+	})
+	env.createRouted(t, func(o *beads.UpdateOpts) {
+		o.Status = strPtr("in_progress")
+		o.Assignee = strPtr("sess-worker")
+	})
+	env.sessions = []session.Info{
+		{ID: "sess-worker", SessionNameMetadata: "worker", Template: "demo/worker", PoolManaged: true},
+	}
+	env.running["worker"] = true
+	env.alive["worker"] = true
+
+	deps := env.deps()
+	failingStore := healInProgressListFailStore{Store: env.store}
+	deps.CityStore = failingStore
+	deps.RigStores = map[string]beads.Store{"demo": failingStore}
+	report := runHealPass(deps)
+
+	if got := env.get(t, p0.ID); got.Assignee != "" {
+		t.Fatalf("P0 was force-assigned with an unreadable busy inventory: assignee=%q", got.Assignee)
+	}
+	if !strings.Contains(strings.Join(report.Errors, "\n"), "busy-identity scan") {
+		t.Errorf("busy inventory failure missing from report: %v", report.Errors)
+	}
+}
+
 func TestHealReleasesWorkHeldByDeadSession(t *testing.T) {
 	env := newHealTestEnv(t)
 	env.landed = 0
@@ -404,6 +500,33 @@ func TestHealReleasesWorkHeldByDeadSession(t *testing.T) {
 	got := env.get(t, dead.ID)
 	if got.Status != "open" || got.Assignee != "" {
 		t.Errorf("dead-session bead = status=%q assignee=%q, want open/unassigned", got.Status, got.Assignee)
+	}
+}
+
+func TestHealSessionListFailureLeavesInProgressWorkAlone(t *testing.T) {
+	env := newHealTestEnv(t)
+	env.landed = 0
+	env.sessionErr = fmt.Errorf("session ledger unavailable")
+
+	openAssigned := env.createRouted(t, func(o *beads.UpdateOpts) {
+		o.Assignee = strPtr("worker-with-open-work")
+	})
+	inFlight := env.createRouted(t, func(o *beads.UpdateOpts) {
+		o.Status = strPtr("in_progress")
+		o.Assignee = strPtr("worker-with-live-work")
+	})
+
+	report := runHealPass(env.deps())
+
+	got := env.get(t, inFlight.ID)
+	if got.Status != "in_progress" || got.Assignee != "worker-with-live-work" {
+		t.Fatalf("in-progress bead changed after session list failure: status=%q assignee=%q", got.Status, got.Assignee)
+	}
+	if got := env.get(t, openAssigned.ID); got.Status != "open" || got.Assignee != "worker-with-open-work" {
+		t.Fatalf("open bead changed after session list failure: status=%q assignee=%q", got.Status, got.Assignee)
+	}
+	if !strings.Contains(strings.Join(report.Errors, "\n"), "listing sessions") {
+		t.Errorf("session list failure missing from report: %v", report.Errors)
 	}
 }
 
@@ -693,5 +816,26 @@ func TestHealRigRepoPath(t *testing.T) {
 		if got := healRigRepoPath("/city", tc.rig); got != tc.want {
 			t.Errorf("%s: healRigRepoPath = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestHealLandedCommitsFailsClosedWhenOriginFetchFails(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "--initial-branch=main")
+	runGit(t, repo, "config", "user.name", "Gas City Test")
+	runGit(t, repo, "config", "user.email", "gc-test@example.test")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	// Keep a readable but stale origin/main ref while pointing origin at a
+	// missing local repository. The throughput probe must not treat that stale
+	// ref as current evidence after fetch fails.
+	runGit(t, repo, "remote", "add", "origin", filepath.Join(t.TempDir(), "missing.git"))
+	runGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	_, err := healLandedCommits(repo, "main", time.Now().Add(-time.Hour))
+	if err == nil {
+		t.Fatal("healLandedCommits() succeeded after origin fetch failure, want fail-closed error")
+	}
+	if !strings.Contains(err.Error(), "fetch") {
+		t.Errorf("healLandedCommits() error = %q, want fetch context", err)
 	}
 }

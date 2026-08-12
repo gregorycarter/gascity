@@ -86,3 +86,30 @@ func TestFetchBranchUpdatesRemoteTrackingRefOnly(t *testing.T) {
 		t.Error("FetchBranch(\"\") succeeded, want error")
 	}
 }
+
+func TestHasRemote(t *testing.T) {
+	repo := initTestRepo(t)
+	g := New(repo)
+	ctx := context.Background()
+
+	hasOrigin, err := g.HasRemote(ctx, "origin")
+	if err != nil {
+		t.Fatalf("HasRemote(origin): %v", err)
+	}
+	if hasOrigin {
+		t.Fatal("HasRemote(origin) = true before origin is configured")
+	}
+
+	runGit(t, repo, "remote", "add", "origin", t.TempDir())
+	hasOrigin, err = g.HasRemote(ctx, "origin")
+	if err != nil {
+		t.Fatalf("HasRemote(origin): %v", err)
+	}
+	if !hasOrigin {
+		t.Fatal("HasRemote(origin) = false after origin is configured")
+	}
+
+	if _, err := g.HasRemote(ctx, ""); err == nil {
+		t.Error("HasRemote(\"\") succeeded, want error")
+	}
+}

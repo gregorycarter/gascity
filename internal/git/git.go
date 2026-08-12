@@ -478,6 +478,24 @@ func (g *Git) FetchBranch(ctx context.Context, branch string) error {
 	return nil
 }
 
+// HasRemote reports whether name is configured as a remote in this repository.
+func (g *Git) HasRemote(ctx context.Context, name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false, fmt.Errorf("checking remote: empty name")
+	}
+	out, err := g.runCtx(ctx, "remote")
+	if err != nil {
+		return false, fmt.Errorf("listing remotes: %w", err)
+	}
+	for _, remote := range strings.Fields(out) {
+		if remote == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // run executes a git command in the working directory. Git environment
 // variables from the parent process are stripped to prevent interference
 // (e.g., when called from a pre-commit hook context).

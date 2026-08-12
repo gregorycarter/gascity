@@ -62,6 +62,22 @@ func TestShouldRunHealWatchdog(t *testing.T) {
 	}
 }
 
+func TestRunHealWatchdogDoesNotAdvanceScheduleWhilePassIsInFlight(t *testing.T) {
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-6 * time.Minute)
+	cr := &CityRuntime{cfg: &config.City{Heal: config.HealConfig{
+		Enabled: true,
+		Targets: []config.HealTarget{{Rig: "demo"}},
+	}}, healWatchdogLast: last}
+	cr.healWatchdogInFlight.Store(true)
+
+	cr.runHealWatchdog(now)
+
+	if got := cr.healWatchdogLast; !got.Equal(last) {
+		t.Fatalf("healWatchdogLast = %s, want unchanged %s while pass is in flight", got, last)
+	}
+}
+
 // TestHealRecentActionsRoundTripsSubjects proves the cooldown read-back sees
 // exactly the subjects the pass records: what record() writes to the event
 // log is what RecentActions keys the cooldown on.

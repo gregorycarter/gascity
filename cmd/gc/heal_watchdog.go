@@ -35,10 +35,10 @@ func (cr *CityRuntime) runHealWatchdog(now time.Time) {
 	if !shouldRunHealWatchdog(cr.cfg, cr.healWatchdogLast, now) {
 		return
 	}
-	cr.healWatchdogLast = now
 	if !cr.healWatchdogInFlight.CompareAndSwap(false, true) {
 		return
 	}
+	cr.healWatchdogLast = now
 	cfg := cr.cfg
 	cityPath := cr.cityPath
 	cityStore := cr.cityBeadStore()

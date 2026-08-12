@@ -159,8 +159,41 @@ func ValidateHealConfig(cfg *City) error {
 		return nil
 	}
 	h := cfg.Heal
+	checkPositiveDuration := func(field, value string) error {
+		if value == "" {
+			return nil
+		}
+		duration, err := time.ParseDuration(value)
+		if err != nil {
+			// Parse errors remain a warning from ValidateDurations, matching
+			// the rest of the city duration surface.
+			return nil
+		}
+		if duration <= 0 {
+			return fmt.Errorf("[heal]: %s must be a positive duration, got %q", field, value)
+		}
+		return nil
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"interval", h.Interval},
+		{"stall_after", h.StallAfter},
+		{"orphan_stale_after", h.OrphanStaleAfter},
+		{"inversion_after", h.InversionAfter},
+		{"stuck_after", h.StuckAfter},
+		{"action_cooldown", h.ActionCooldown},
+	} {
+		if err := checkPositiveDuration(field.name, field.value); err != nil {
+			return err
+		}
+	}
 	if h.InversionPriority != nil && *h.InversionPriority < 0 {
 		return fmt.Errorf("[heal]: inversion_priority must be >= 0, got %d", *h.InversionPriority)
+	}
+	if h.MaxActionsPerPass != nil && *h.MaxActionsPerPass <= 0 {
+		return fmt.Errorf("[heal]: max_actions_per_pass must be > 0, got %d", *h.MaxActionsPerPass)
 	}
 	for i, name := range h.CriticalSessions {
 		if strings.TrimSpace(name) == "" {

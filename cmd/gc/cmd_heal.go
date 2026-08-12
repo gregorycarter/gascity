@@ -137,7 +137,8 @@ func buildHealDeps(
 
 // healRecentActions reads the per-subject cooldown state back from the event
 // log: subjects of heal.action events recorded at or after since. Returns nil
-// (no cooldowns) when the recorder cannot list events.
+// when the recorder cannot list events; runHealPass treats that as an
+// unavailable audit ledger and fails closed rather than bypassing cooldowns.
 func healRecentActions(rec events.Recorder, since time.Time) map[string]time.Time {
 	lister, ok := rec.(interface {
 		List(events.Filter) ([]events.Event, error)
@@ -163,25 +164,33 @@ func healRecentActions(rec events.Recorder, since time.Time) map[string]time.Tim
 }
 
 // healLandedCommits counts commits landed on the rig mainline within the
-// window. It freshens the origin tracking ref best-effort, prefers the
-// origin/<branch> view (the merge target), and falls back to the local
-// branch for rigs without a remote.
+// window. It freshens the origin tracking ref when origin is configured and
+// treats a fetch failure as an unreadable measurement: using a stale
+// origin/<branch> ref could falsely declare a productive rig stalled. Rigs
+// without an origin remote use their local branch instead.
 func healLandedCommits(repoPath, branch string, since time.Time) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), healGitTimeout)
 	defer cancel()
 	g := git.New(repoPath)
-	fetchErr := g.FetchBranch(ctx, branch)
-	count, originErr := g.CommitCountSince(ctx, "origin/"+branch, since)
-	if originErr == nil {
+	hasOrigin, err := g.HasRemote(ctx, "origin")
+	if err != nil {
+		return 0, fmt.Errorf("checking mainline remote: %w", err)
+	}
+	if hasOrigin {
+		if err := g.FetchBranch(ctx, branch); err != nil {
+			return 0, fmt.Errorf("fetching mainline %q: %w", branch, err)
+		}
+		count, err := g.CommitCountSince(ctx, "origin/"+branch, since)
+		if err != nil {
+			return 0, err
+		}
 		return count, nil
 	}
-	if count, localErr := g.CommitCountSince(ctx, branch, since); localErr == nil {
-		return count, nil
+	count, err := g.CommitCountSince(ctx, branch, since)
+	if err != nil {
+		return 0, err
 	}
-	if fetchErr != nil {
-		return 0, fmt.Errorf("no readable mainline ref (fetch: %w): %w", fetchErr, originErr)
-	}
-	return 0, originErr
+	return count, nil
 }
 
 // healRunCheck executes a configured shell check command in dir. A nil

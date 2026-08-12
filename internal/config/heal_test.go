@@ -183,6 +183,34 @@ func TestValidateHealConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("non-positive remediation limits fail", func(t *testing.T) {
+		cases := []struct {
+			field string
+			apply func(*HealConfig)
+		}{
+			{"interval", func(h *HealConfig) { h.Interval = "0s" }},
+			{"stall_after", func(h *HealConfig) { h.StallAfter = "-1s" }},
+			{"orphan_stale_after", func(h *HealConfig) { h.OrphanStaleAfter = "0s" }},
+			{"inversion_after", func(h *HealConfig) { h.InversionAfter = "-1s" }},
+			{"stuck_after", func(h *HealConfig) { h.StuckAfter = "0s" }},
+			{"action_cooldown", func(h *HealConfig) { h.ActionCooldown = "-1s" }},
+			{"max_actions_per_pass", func(h *HealConfig) {
+				zero := 0
+				h.MaxActionsPerPass = &zero
+			}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.field, func(t *testing.T) {
+				cfg := base()
+				tc.apply(&cfg.Heal)
+				err := ValidateHealConfig(cfg)
+				if err == nil || !strings.Contains(err.Error(), tc.field) {
+					t.Fatalf("ValidateHealConfig() = %v, want non-positive %s error", err, tc.field)
+				}
+			})
+		}
+	})
+
 	t.Run("workflow without route fails", func(t *testing.T) {
 		cfg := base()
 		cfg.Heal = HealConfig{Targets: []HealTarget{{Rig: "demo", MainRedWorkflow: "mol-x"}}}

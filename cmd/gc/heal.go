@@ -155,7 +155,11 @@ type healPass struct {
 	budget   int
 	acted    int
 	seen     map[string]bool
-	report   healReport
+	// cooldownReadable is false when the durable event ledger cannot supply
+	// prior actions. Mutating without that state would bypass the anti-thrash
+	// cooldown, so non-dry-run remediation fails closed in that state.
+	cooldownReadable bool
+	report           healReport
 }
 
 // runHealPass executes one deterministic heal pass and returns its report.
@@ -170,13 +174,18 @@ func runHealPass(deps healDeps) healReport {
 		seen:     map[string]bool{},
 	}
 	pass.report.DryRun = deps.DryRun
+	pass.cooldownReadable = deps.DryRun
 	if deps.RecentActions != nil {
 		pass.recent = deps.RecentActions(pass.now.Add(-pass.cooldown))
+		pass.cooldownReadable = pass.recent != nil
+	}
+	if !pass.cooldownReadable {
+		pass.errf("heal: audit ledger unavailable; refusing remediation without cooldown state")
 	}
 
-	sessions := pass.openSessions()
+	sessions, sessionsReadable := pass.openSessions()
 	identityIndex := healSessionIdentityIndex(sessions)
-	busy := pass.busyIdentities()
+	busy, busyReadable := pass.busyIdentities()
 
 	for _, target := range deps.Cfg.Heal.Targets {
 		rig := findRigByName(target.Rig, deps.Cfg.Rigs)
@@ -184,7 +193,7 @@ func runHealPass(deps healDeps) healReport {
 			pass.errf("heal: target rig %q not found in config", target.Rig)
 			continue
 		}
-		pass.healTargetRig(target, *rig, sessions, identityIndex, busy)
+		pass.healTargetRig(target, *rig, sessions, sessionsReadable, identityIndex, busy, busyReadable)
 	}
 
 	pass.healCriticalSessions()
@@ -192,7 +201,7 @@ func runHealPass(deps healDeps) healReport {
 }
 
 // healTargetRig runs detection and the stall-gated rungs for one rig.
-func (p *healPass) healTargetRig(target config.HealTarget, rig config.Rig, sessions []session.Info, identityIndex map[string]session.Info, busy map[string]bool) {
+func (p *healPass) healTargetRig(target config.HealTarget, rig config.Rig, sessions []session.Info, sessionsReadable bool, identityIndex map[string]session.Info, busy map[string]bool, busyReadable bool) {
 	store := p.rigStore(target.Rig)
 	if store == nil {
 		p.errf("heal: no bead store for rig %q", target.Rig)
@@ -232,9 +241,13 @@ func (p *healPass) healTargetRig(target config.HealTarget, rig config.Rig, sessi
 
 	if rigReport.Stalled {
 		p.emitStall(rigReport, window)
-		p.healOrphanedRoutedWork(target, store)
-		p.healPriorityInversion(target, store, sessions, busy)
-		p.healDeadOrStuckSessions(target, store, identityIndex)
+		if sessionsReadable {
+			p.healOrphanedRoutedWork(target, store)
+			if busyReadable {
+				p.healPriorityInversion(target, store, sessions, busy)
+			}
+			p.healDeadOrStuckSessions(target, store, identityIndex)
+		}
 	}
 	p.report.Rigs = append(p.report.Rigs, rigReport)
 }
@@ -608,6 +621,10 @@ func (p *healPass) allow(rung int, kind, subject, rig string) bool {
 		return false
 	}
 	p.seen[subject] = true
+	if !p.cooldownReadable {
+		p.capped(rung, kind, subject, rig, "audit-unavailable")
+		return false
+	}
 	if last, ok := p.recent[subject]; ok && p.now.Sub(last) < p.cooldown {
 		p.capped(rung, kind, subject, rig, "cooldown")
 		return false
@@ -751,15 +768,18 @@ func (p *healPass) oldestDemandAge(store beads.Store) time.Duration {
 
 // busyIdentities returns every assignee identity currently holding
 // in_progress work across the city store and all target rig stores.
-func (p *healPass) busyIdentities() map[string]bool {
+func (p *healPass) busyIdentities() (map[string]bool, bool) {
 	busy := map[string]bool{}
+	complete := true
 	scan := func(store beads.Store) {
 		if store == nil {
+			complete = false
 			return
 		}
 		inProgress, err := store.List(beads.ListQuery{Status: "in_progress"})
 		if err != nil {
 			p.errf("heal: busy-identity scan: %v", err)
+			complete = false
 			return
 		}
 		for _, wb := range inProgress {
@@ -778,19 +798,20 @@ func (p *healPass) busyIdentities() map[string]bool {
 		seen[store] = true
 		scan(store)
 	}
-	return busy
+	return busy, complete
 }
 
-// openSessions loads the open session records, recording (not failing on)
-// list errors.
-func (p *healPass) openSessions() []session.Info {
+// openSessions loads the open session records. Its boolean result reports
+// whether the inventory is complete enough for session-dependent remediation.
+func (p *healPass) openSessions() ([]session.Info, bool) {
 	if p.deps.ListOpenSessions == nil {
-		return nil
+		p.errf("heal: session lister unavailable")
+		return nil, false
 	}
 	sessions, err := p.deps.ListOpenSessions()
 	if err != nil {
 		p.errf("heal: listing sessions: %v", err)
-		return nil
+		return nil, false
 	}
 	open := sessions[:0:0]
 	for _, info := range sessions {
@@ -800,7 +821,7 @@ func (p *healPass) openSessions() []session.Info {
 		open = append(open, info)
 	}
 	sort.Slice(open, func(i, j int) bool { return open[i].ID < open[j].ID })
-	return open
+	return open, true
 }
 
 // observe wraps the Observe dep with a nil guard.
@@ -811,12 +832,11 @@ func (p *healPass) observe(target string) (worker.LiveObservation, error) {
 	return p.deps.Observe(target)
 }
 
-// rigStore returns the bead store for a rig, falling back to the city store.
+// rigStore returns the bead store scoped to rig. A missing target store is not
+// interchangeable with the city store: healing it through that fallback could
+// mutate unrelated city-scoped work, so callers fail closed instead.
 func (p *healPass) rigStore(rigName string) beads.Store {
-	if store := p.deps.RigStores[rigName]; store != nil {
-		return store
-	}
-	return p.deps.CityStore
+	return p.deps.RigStores[rigName]
 }
 
 func (p *healPass) errf(format string, args ...any) {
