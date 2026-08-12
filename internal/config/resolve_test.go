@@ -509,6 +509,55 @@ func TestResolveProviderKimiStartupDialogPolicyInheritedByWrapper(t *testing.T) 
 	if rp.AcceptStartupDialogs == nil || *rp.AcceptStartupDialogs {
 		t.Fatalf("AcceptStartupDialogs = %v, want false inherited from builtin kimi", rp.AcceptStartupDialogs)
 	}
+	if rp.AutoApproveACPPermissions == nil || !*rp.AutoApproveACPPermissions {
+		t.Fatalf("AutoApproveACPPermissions = %v, want true inherited from builtin kimi", rp.AutoApproveACPPermissions)
+	}
+}
+
+func TestResolveProviderKimiACPApprovalPolicyCanBeDisabled(t *testing.T) {
+	base := "builtin:kimi"
+	deny := false
+	agent := &Agent{Name: "scout", Provider: "wrapped-kimi"}
+	cityProviders := map[string]ProviderSpec{
+		"wrapped-kimi": {
+			Base:                      &base,
+			AutoApproveACPPermissions: &deny,
+		},
+	}
+	rp, err := ResolveProvider(agent, nil, cityProviders, lookPathOnly("kimi"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.AutoApproveACPPermissions == nil || *rp.AutoApproveACPPermissions {
+		t.Fatalf("AutoApproveACPPermissions = %v, want explicit false override", rp.AutoApproveACPPermissions)
+	}
+}
+
+func TestAutoApproveACPPermissionsFalseSurvivesTOMLInheritance(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+[workspace]
+name = "test"
+
+[providers.kimi-deny]
+base = "builtin:kimi"
+auto_approve_acp_permissions = false
+`)
+	cfg, _, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	spec := cfg.Providers["kimi-deny"]
+	if spec.AutoApproveACPPermissions == nil || *spec.AutoApproveACPPermissions {
+		t.Fatalf("AutoApproveACPPermissions = %v, want decoded explicit false", spec.AutoApproveACPPermissions)
+	}
+	resolved, err := ResolveProviderChain("kimi-deny", spec, cfg.Providers)
+	if err != nil {
+		t.Fatalf("ResolveProviderChain: %v", err)
+	}
+	if resolved.AutoApproveACPPermissions == nil || *resolved.AutoApproveACPPermissions {
+		t.Fatalf("resolved AutoApproveACPPermissions = %v, want inherited override false", resolved.AutoApproveACPPermissions)
+	}
 }
 
 func TestResolveProviderKiroStartupDialogPolicyInheritedByWrapper(t *testing.T) {
@@ -1827,9 +1876,9 @@ func TestResolveProviderOpenCodeStartupDialogPolicyInheritedByWrapper(t *testing
 
 // --- Tri-state capability bool tests ---
 //
-// These verify the three-way *bool semantics for SupportsHooks,
-// SupportsACP, and EmitsPermissionWarning per the provider-inheritance
-// design §Tri-state capability bools.
+// These verify the three-way *bool semantics for provider behavior and
+// capability fields per the provider-inheritance design §Tri-state capability
+// bools.
 
 func TestMergeProviderOverBuiltinTriStateChildDisablesParentEnable(t *testing.T) {
 	// Parent sets &true, child explicitly sets &false → final &false.
@@ -2190,37 +2239,38 @@ func TestResolveProviderResumeCommandAgentOverride(t *testing.T) {
 func TestMergeProviderOverBuiltinFieldSync(t *testing.T) {
 	basePtr := "builtin:custom"
 	city := ProviderSpec{
-		Base:                   &basePtr,
-		ArgsAppend:             []string{"--extra"},
-		OptionsSchemaMerge:     "by_key",
-		DisplayName:            "Custom",
-		Command:                "custom-cmd",
-		Args:                   []string{"--flag"},
-		PromptMode:             "flag",
-		PromptFlag:             "--prompt",
-		ReadyDelayMs:           5000,
-		ReadyPromptPrefix:      "$ ",
-		ProcessNames:           []string{"custom"},
-		EmitsPermissionWarning: boolPtr(true),
-		AcceptStartupDialogs:   boolPtr(true),
-		Env:                    map[string]string{"K": "V"},
-		PathCheck:              "custom-bin",
-		SupportsACP:            boolPtr(true),
-		SupportsHooks:          boolPtr(true),
-		InstructionsFile:       "CUSTOM.md",
-		ResumeFlag:             "--resume",
-		ResumeStyle:            "flag",
-		ResumeCommand:          "custom-cmd --resume {{.SessionKey}}",
-		SessionIDFlag:          "--session-id",
-		ForkFlag:               "--fork-session",
-		PermissionModes:        map[string]string{"yolo": "--yolo"},
-		OptionDefaults:         map[string]string{"permission_mode": "yolo"},
-		OptionsSchema:          []ProviderOption{{Key: "model"}},
-		UpstreamEnv:            UpstreamEnvBinding{BaseURL: "X_BASE_URL", APIKey: "X_API_KEY", AuthToken: "X_AUTH_TOKEN"},
-		PrintArgs:              []string{"-p"},
-		TitleModel:             "haiku",
-		ACPCommand:             "custom-acp",
-		ACPArgs:                []string{"acp-mode"},
+		Base:                      &basePtr,
+		ArgsAppend:                []string{"--extra"},
+		OptionsSchemaMerge:        "by_key",
+		DisplayName:               "Custom",
+		Command:                   "custom-cmd",
+		Args:                      []string{"--flag"},
+		PromptMode:                "flag",
+		PromptFlag:                "--prompt",
+		ReadyDelayMs:              5000,
+		ReadyPromptPrefix:         "$ ",
+		ProcessNames:              []string{"custom"},
+		EmitsPermissionWarning:    boolPtr(true),
+		AcceptStartupDialogs:      boolPtr(true),
+		AutoApproveACPPermissions: boolPtr(true),
+		Env:                       map[string]string{"K": "V"},
+		PathCheck:                 "custom-bin",
+		SupportsACP:               boolPtr(true),
+		SupportsHooks:             boolPtr(true),
+		InstructionsFile:          "CUSTOM.md",
+		ResumeFlag:                "--resume",
+		ResumeStyle:               "flag",
+		ResumeCommand:             "custom-cmd --resume {{.SessionKey}}",
+		SessionIDFlag:             "--session-id",
+		ForkFlag:                  "--fork-session",
+		PermissionModes:           map[string]string{"yolo": "--yolo"},
+		OptionDefaults:            map[string]string{"permission_mode": "yolo"},
+		OptionsSchema:             []ProviderOption{{Key: "model"}},
+		UpstreamEnv:               UpstreamEnvBinding{BaseURL: "X_BASE_URL", APIKey: "X_API_KEY", AuthToken: "X_AUTH_TOKEN"},
+		PrintArgs:                 []string{"-p"},
+		TitleModel:                "haiku",
+		ACPCommand:                "custom-acp",
+		ACPArgs:                   []string{"acp-mode"},
 	}
 
 	// Verify every field on city is non-zero (catches new fields not added to test data).

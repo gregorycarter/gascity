@@ -33,18 +33,20 @@ func TestResolvedSessionConfigForProviderBuildsNormalizedConfig(t *testing.T) {
 		Command: "/bin/mcp",
 		Args:    []string{"--stdio"},
 	}}
+	autoApprove := true
 	resolved := &config.ResolvedProvider{
-		Name:                   "stub",
-		Command:                "/bin/echo",
-		ReadyPromptPrefix:      "stub-ready>",
-		ReadyDelayMs:           250,
-		ProcessNames:           []string{"echo"},
-		EmitsPermissionWarning: true,
-		Env:                    env,
-		ResumeFlag:             "--resume",
-		ResumeStyle:            "flag",
-		ResumeCommand:          "resume-cmd",
-		SessionIDFlag:          "--session-id",
+		Name:                      "stub",
+		Command:                   "/bin/echo",
+		ReadyPromptPrefix:         "stub-ready>",
+		ReadyDelayMs:              250,
+		ProcessNames:              []string{"echo"},
+		EmitsPermissionWarning:    true,
+		AutoApproveACPPermissions: &autoApprove,
+		Env:                       env,
+		ResumeFlag:                "--resume",
+		ResumeStyle:               "flag",
+		ResumeCommand:             "resume-cmd",
+		SessionIDFlag:             "--session-id",
 	}
 
 	cfg, err := resolvedSessionConfigForProvider(
@@ -79,6 +81,9 @@ func TestResolvedSessionConfigForProviderBuildsNormalizedConfig(t *testing.T) {
 	}
 	if got, want := cfg.Runtime.Hints.ReadyPromptPrefix, "stub-ready>"; got != want {
 		t.Fatalf("Runtime.Hints.ReadyPromptPrefix = %q, want %q", got, want)
+	}
+	if cfg.Runtime.Hints.AutoApproveACPPermissions == nil || !*cfg.Runtime.Hints.AutoApproveACPPermissions {
+		t.Fatalf("Runtime.Hints.AutoApproveACPPermissions = %v, want true", cfg.Runtime.Hints.AutoApproveACPPermissions)
 	}
 	if len(cfg.Runtime.Hints.MCPServers) != 1 {
 		t.Fatalf("Runtime.Hints.MCPServers len = %d, want 1", len(cfg.Runtime.Hints.MCPServers))
@@ -251,6 +256,17 @@ func TestSessionCreateHintsEnablesMouse(t *testing.T) {
 	hints := sessionCreateHints(&config.ResolvedProvider{Name: "stub"}, nil, nil)
 	if !hints.MouseOn {
 		t.Error("sessionCreateHints().MouseOn = false, want true (interactive wheel→scrollback, ga-c4w)")
+	}
+}
+
+func TestSessionRuntimeHintsCarryACPApprovalPolicy(t *testing.T) {
+	autoApprove := true
+	resolved := &config.ResolvedProvider{AutoApproveACPPermissions: &autoApprove}
+	if hints := sessionCreateHints(resolved, nil, nil); hints.AutoApproveACPPermissions == nil || !*hints.AutoApproveACPPermissions {
+		t.Fatalf("sessionCreateHints().AutoApproveACPPermissions = %v, want true", hints.AutoApproveACPPermissions)
+	}
+	if hints := sessionResumeHints(resolved, "", nil, nil, false); hints.AutoApproveACPPermissions == nil || !*hints.AutoApproveACPPermissions {
+		t.Fatalf("sessionResumeHints().AutoApproveACPPermissions = %v, want true", hints.AutoApproveACPPermissions)
 	}
 }
 

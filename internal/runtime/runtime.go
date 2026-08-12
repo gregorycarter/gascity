@@ -592,6 +592,11 @@ type Config struct {
 	// Nil keeps the runtime default derived from other startup hints.
 	AcceptStartupDialogs *bool
 
+	// AutoApproveACPPermissions controls replies to structured ACP tool-call
+	// permission requests. Nil and false reject the request; true selects the
+	// least-persistent allow option offered by the agent.
+	AutoApproveACPPermissions *bool
+
 	// MouseOn reports whether tmux mouse mode should be preserved for this session.
 	// When false, tmux startup disables mouse mode and monitor-activity to keep
 	// terminal mouse escape sequences out of headless agent stdin.

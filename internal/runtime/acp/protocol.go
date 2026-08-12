@@ -11,12 +11,14 @@
 package acp
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync/atomic"
 
 	"github.com/gastownhall/gascity/internal/runtime"
@@ -25,11 +27,71 @@ import (
 // nextID is a package-level counter for JSON-RPC request IDs.
 var nextID atomic.Int64
 
+// JSONRPCID preserves the JSON-RPC request identifier exactly as it appeared
+// on the wire. ACP permits integer, string, and null request IDs; requests
+// received from an agent must be answered with the same value. A nil value
+// means the id member was absent and therefore the message is a notification.
+type JSONRPCID json.RawMessage
+
+// numericJSONRPCID returns the integer request ID used for client-originated
+// requests. Incoming agent requests may use any valid JSONRPCID form.
+func numericJSONRPCID(id int64) JSONRPCID {
+	return JSONRPCID(strconv.FormatInt(id, 10))
+}
+
+func (id JSONRPCID) present() bool {
+	return len(id) != 0
+}
+
+func (id JSONRPCID) int64() (int64, bool) {
+	if bytes.Equal(bytes.TrimSpace(id), []byte("null")) {
+		return 0, false
+	}
+	var value int64
+	if err := json.Unmarshal(id, &value); err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+// MarshalJSON emits the preserved ID value. JSONRPCID is a named raw-message
+// type so it needs an explicit marshaler rather than being encoded as bytes.
+func (id JSONRPCID) MarshalJSON() ([]byte, error) {
+	if len(id) == 0 {
+		return []byte("null"), nil
+	}
+	return id, nil
+}
+
+// UnmarshalJSON accepts the ID forms allowed by ACP and preserves their raw
+// representation so responses can correlate with agent-originated requests.
+func (id *JSONRPCID) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Equal(trimmed, []byte("null")) {
+		*id = append((*id)[:0], trimmed...)
+		return nil
+	}
+
+	var stringID string
+	if err := json.Unmarshal(trimmed, &stringID); err == nil {
+		*id = append((*id)[:0], trimmed...)
+		return nil
+	}
+
+	var numericID int64
+	if err := json.Unmarshal(trimmed, &numericID); err == nil {
+		*id = append((*id)[:0], trimmed...)
+		return nil
+	}
+
+	return fmt.Errorf("JSON-RPC id must be a string, integer, or null")
+}
+
 // JSONRPCMessage is a unified JSON-RPC 2.0 message. It can represent a
 // request, response, or notification depending on which fields are set.
 type JSONRPCMessage struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      *int64          `json:"id,omitempty"`     // nil for notifications
+	ID      JSONRPCID       `json:"id,omitempty"`     // empty for notifications
 	Method  string          `json:"method,omitempty"` // set for requests/notifications
 	Params  json.RawMessage `json:"params,omitempty"` // set for requests/notifications
 	Result  json.RawMessage `json:"result,omitempty"` // set for responses
@@ -174,7 +236,7 @@ func newRequest(method string, params any) (JSONRPCMessage, int64) {
 	id := nextID.Add(1)
 	msg := JSONRPCMessage{
 		JSONRPC: "2.0",
-		ID:      &id,
+		ID:      numericJSONRPCID(id),
 		Method:  method,
 	}
 	if params != nil {

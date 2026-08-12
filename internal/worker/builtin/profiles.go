@@ -43,15 +43,18 @@ type BuiltinProviderSpec struct {
 	ProcessNames           []string
 	EmitsPermissionWarning bool
 	AcceptStartupDialogs   *bool
-	Env                    map[string]string
-	PathCheck              string
-	SupportsACP            bool
-	SupportsHooks          bool
-	InstructionsFile       string
-	ResumeFlag             string
-	ResumeStyle            string
-	ResumeCommand          string
-	SessionIDFlag          string
+	// AutoApproveACPPermissions selects the approval policy for ACP tool-call
+	// requests. Nil leaves the client in its safe rejection-by-default mode.
+	AutoApproveACPPermissions *bool
+	Env                       map[string]string
+	PathCheck                 string
+	SupportsACP               bool
+	SupportsHooks             bool
+	InstructionsFile          string
+	ResumeFlag                string
+	ResumeStyle               string
+	ResumeCommand             string
+	SessionIDFlag             string
 	// ForkFlag is the CLI flag that forks a resumed conversation into a new
 	// branch. Combined with ResumeFlag + SessionIDFlag it yields the fork-launch
 	// form (resume a parent brain, fork off it, bind gc's own session id). Empty
@@ -414,14 +417,17 @@ var builtinProviderSpecs = map[string]BuiltinProviderSpec{
 		ReadyDelayMs:         5000,
 		ProcessNames:         []string{"kimi", "python"},
 		AcceptStartupDialogs: boolPtr(false),
-		SupportsACP:          true,
-		SupportsHooks:        true,
-		InstructionsFile:     "AGENTS.md",
-		ResumeFlag:           "--session",
-		ResumeStyle:          "flag",
-		PrintArgs:            []string{"--quiet", "--prompt"},
-		TitleModel:           "kimi-k2.6",
-		ACPArgs:              []string{"--yolo", "--no-thinking", "acp"},
+		// The ACP launch carries Kimi's explicit --yolo policy, so answer its
+		// structured permission requests consistently with that launch intent.
+		AutoApproveACPPermissions: boolPtr(true),
+		SupportsACP:               true,
+		SupportsHooks:             true,
+		InstructionsFile:          "AGENTS.md",
+		ResumeFlag:                "--session",
+		ResumeStyle:               "flag",
+		PrintArgs:                 []string{"--quiet", "--prompt"},
+		TitleModel:                "kimi-k2.6",
+		ACPArgs:                   []string{"--yolo", "--no-thinking", "acp"},
 		OptionsSchema: []BuiltinProviderOption{
 			{
 				Key:   "model",
@@ -865,6 +871,8 @@ func newProfileIdentity(profile, family string) ProfileIdentity {
 func cloneBuiltinProviderSpec(spec BuiltinProviderSpec) BuiltinProviderSpec {
 	spec.Args = cloneStrings(spec.Args)
 	spec.ProcessNames = cloneStrings(spec.ProcessNames)
+	spec.AcceptStartupDialogs = cloneBoolPtr(spec.AcceptStartupDialogs)
+	spec.AutoApproveACPPermissions = cloneBoolPtr(spec.AutoApproveACPPermissions)
 	spec.Env = cloneStringMap(spec.Env)
 	spec.PermissionModes = cloneStringMap(spec.PermissionModes)
 	spec.OptionDefaults = cloneStringMap(spec.OptionDefaults)
@@ -916,6 +924,14 @@ func cloneStringMap(values map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func cloneBoolPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func cloneStrings(values []string) []string {

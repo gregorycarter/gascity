@@ -25,7 +25,7 @@ func TestJSONRPCMessage_RequestRoundTrip(t *testing.T) {
 	if decoded.JSONRPC != "2.0" {
 		t.Errorf("jsonrpc = %q, want %q", decoded.JSONRPC, "2.0")
 	}
-	if decoded.ID == nil || *decoded.ID != id {
+	if decodedID, ok := decoded.ID.int64(); !ok || decodedID != id {
 		t.Errorf("id = %v, want %d", decoded.ID, id)
 	}
 	if decoded.Method != "initialize" {
@@ -53,11 +53,24 @@ func TestJSONRPCMessage_NotificationOmitsID(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if decoded.ID != nil {
-		t.Errorf("notification should have nil ID, got %d", *decoded.ID)
+	if decoded.ID.present() {
+		t.Errorf("notification should omit ID, got %s", decoded.ID)
 	}
 	if decoded.Method != "initialized" {
 		t.Errorf("method = %q, want %q", decoded.Method, "initialized")
+	}
+}
+
+func TestJSONRPCIDInt64RejectsNull(t *testing.T) {
+	var msg JSONRPCMessage
+	if err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":null,"result":{}}`), &msg); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !msg.ID.present() {
+		t.Fatal("null ID should remain present on the wire")
+	}
+	if id, ok := msg.ID.int64(); ok {
+		t.Fatalf("int64() = %d, true; want no numeric correlation for null ID", id)
 	}
 }
 
@@ -66,7 +79,7 @@ func TestJSONRPCMessage_ResponseRoundTrip(t *testing.T) {
 	result, _ := json.Marshal(SessionNewResult{SessionID: "sess-1"})
 	msg := JSONRPCMessage{
 		JSONRPC: "2.0",
-		ID:      &id,
+		ID:      numericJSONRPCID(id),
 		Result:  result,
 	}
 
@@ -80,7 +93,7 @@ func TestJSONRPCMessage_ResponseRoundTrip(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if decoded.ID == nil || *decoded.ID != 42 {
+	if decodedID, ok := decoded.ID.int64(); !ok || decodedID != 42 {
 		t.Errorf("id = %v, want 42", decoded.ID)
 	}
 	if decoded.Method != "" {
@@ -100,7 +113,7 @@ func TestJSONRPCMessage_ErrorRoundTrip(t *testing.T) {
 	id := int64(99)
 	msg := JSONRPCMessage{
 		JSONRPC: "2.0",
-		ID:      &id,
+		ID:      numericJSONRPCID(id),
 		Error:   &JSONRPCError{Code: -32601, Message: "method not found"},
 	}
 

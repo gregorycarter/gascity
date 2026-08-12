@@ -2415,6 +2415,10 @@
           "type": "boolean",
           "description": "AcceptStartupDialogs is tri-state: nil = default startup dialog handling,\n\u0026true = force dialog acceptance, \u0026false = suppress it for providers that\nhandle permissions entirely through launch flags."
         },
+        "auto_approve_acp_permissions": {
+          "type": "boolean",
+          "description": "AutoApproveACPPermissions is tri-state: nil = reject ACP permission\nrequests by default, \u0026true = select an allow option, \u0026false = explicitly\nselect a reject option. Enable it only for a provider launch whose own\nconfiguration deliberately grants non-interactive tool permissions."
+        },
         "env": {
           "additionalProperties": {
             "type": "string"

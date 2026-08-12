@@ -245,6 +245,7 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 	}
 
 	sc := newSessionConn(cmd, stdinPipe, lis, p.cfg.outputBufferLines(), processDone)
+	sc.autoApprovePermissionRequests = cfg.AutoApproveACPPermissions != nil && *cfg.AutoApproveACPPermissions
 
 	// Start readLoop before handshake so we can receive responses.
 	go sc.readLoop(stdoutPipe)

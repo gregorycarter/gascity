@@ -97,12 +97,13 @@ func (s *Server) sessionLogPaths() []string {
 
 func sessionCreateHints(resolved *config.ResolvedProvider, sessionEnv map[string]string, mcpServers []runtime.MCPServerConfig) runtime.Config {
 	return runtime.Config{
-		Lifecycle:              runtime.Lifecycle(resolved.Lifecycle),
-		ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
-		ReadyDelayMs:           resolved.ReadyDelayMs,
-		ProcessNames:           resolved.ProcessNames,
-		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
-		AcceptStartupDialogs:   resolved.AcceptStartupDialogs,
+		Lifecycle:                 runtime.Lifecycle(resolved.Lifecycle),
+		ReadyPromptPrefix:         resolved.ReadyPromptPrefix,
+		ReadyDelayMs:              resolved.ReadyDelayMs,
+		ProcessNames:              resolved.ProcessNames,
+		EmitsPermissionWarning:    resolved.EmitsPermissionWarning,
+		AcceptStartupDialogs:      resolved.AcceptStartupDialogs,
+		AutoApproveACPPermissions: resolved.AutoApproveACPPermissions,
 		// API session-create path (dashboard / real-world-app), NOT the
 		// `gc session new` CLI seam — the CLI resolves MouseOn in cmd/gc
 		// (workerSessionCreateHints + templateParamsToConfig, ga-c4w). MouseOn
@@ -140,16 +141,17 @@ func legacySessionKind(metadata map[string]string) string {
 // -safety invariant (regression ga-g7go).
 func sessionResumeHints(resolved *config.ResolvedProvider, workDir string, sessionEnv map[string]string, mcpServers []runtime.MCPServerConfig, interactive bool) runtime.Config {
 	return runtime.Config{
-		WorkDir:                workDir,
-		Lifecycle:              runtime.Lifecycle(resolved.Lifecycle),
-		ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
-		ReadyDelayMs:           resolved.ReadyDelayMs,
-		ProcessNames:           resolved.ProcessNames,
-		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
-		AcceptStartupDialogs:   resolved.AcceptStartupDialogs,
-		MouseOn:                interactive,
-		Env:                    sessionEnv,
-		MCPServers:             mcpServers,
+		WorkDir:                   workDir,
+		Lifecycle:                 runtime.Lifecycle(resolved.Lifecycle),
+		ReadyPromptPrefix:         resolved.ReadyPromptPrefix,
+		ReadyDelayMs:              resolved.ReadyDelayMs,
+		ProcessNames:              resolved.ProcessNames,
+		EmitsPermissionWarning:    resolved.EmitsPermissionWarning,
+		AcceptStartupDialogs:      resolved.AcceptStartupDialogs,
+		AutoApproveACPPermissions: resolved.AutoApproveACPPermissions,
+		MouseOn:                   interactive,
+		Env:                       sessionEnv,
+		MCPServers:                mcpServers,
 	}
 }
 

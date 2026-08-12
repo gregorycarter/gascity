@@ -2336,6 +2336,14 @@ func TestWorkerSessionCreateHintsEnablesMouse(t *testing.T) {
 	}
 }
 
+func TestWorkerSessionCreateHintsCarriesACPApprovalPolicy(t *testing.T) {
+	autoApprove := true
+	hints := workerSessionCreateHints(&config.ResolvedProvider{AutoApproveACPPermissions: &autoApprove})
+	if hints.AutoApproveACPPermissions == nil || !*hints.AutoApproveACPPermissions {
+		t.Fatalf("workerSessionCreateHints().AutoApproveACPPermissions = %v, want true", hints.AutoApproveACPPermissions)
+	}
+}
+
 // piVllmRigCity builds an in-memory city with a single rig-scoped agent
 // "myrig/polecat" running a custom provider whose base = "builtin:pi", plus a
 // rig overlay dir carrying the per-provider/pi/ hooks. It mirrors the real

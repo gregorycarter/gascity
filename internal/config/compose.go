@@ -1285,6 +1285,11 @@ func deepMergeProvider(base, frag ProviderSpec, name string, fragMeta toml.MetaD
 			func() bool { return base.AcceptStartupDialogs != nil },
 			func() { result.AcceptStartupDialogs = cloneBoolPtr(frag.AcceptStartupDialogs) },
 		},
+		{
+			"auto_approve_acp_permissions",
+			func() bool { return base.AutoApproveACPPermissions != nil },
+			func() { result.AutoApproveACPPermissions = cloneBoolPtr(frag.AutoApproveACPPermissions) },
+		},
 	}
 	for _, sf := range scalars {
 		if fragMeta.IsDefined("providers", name, sf.key) {

@@ -116,6 +116,10 @@ func startupRuntimeConfigMaterializationResult(tc phase2ProviderCase, tp Templat
 		return workertest.Fail(tc.profileID, workertest.RequirementStartupRuntimeConfigMaterialization,
 			fmt.Sprintf("cfg.AcceptStartupDialogs = %s, want %s",
 				phase2BoolPtrString(cfg.AcceptStartupDialogs), phase2BoolPtrString(tc.wantAcceptDialogs))).WithEvidence(evidence)
+	case !phase2BoolPtrsEqual(cfg.AutoApproveACPPermissions, tc.wantAutoApproveACPPermissions):
+		return workertest.Fail(tc.profileID, workertest.RequirementStartupRuntimeConfigMaterialization,
+			fmt.Sprintf("cfg.AutoApproveACPPermissions = %s, want %s",
+				phase2BoolPtrString(cfg.AutoApproveACPPermissions), phase2BoolPtrString(tc.wantAutoApproveACPPermissions))).WithEvidence(evidence)
 	case !startupNudgeMatches(tc, cfg.Nudge):
 		return workertest.Fail(tc.profileID, workertest.RequirementStartupRuntimeConfigMaterialization,
 			fmt.Sprintf("cfg.Nudge = %q, want startup nudge plus %q", cfg.Nudge, "nudge-"+tc.family)).WithEvidence(evidence)
@@ -360,6 +364,7 @@ func phase2ConfigEvidence(tc phase2ProviderCase, tp TemplateParams, cfg runtime.
 	evidence["cfg_process_names"] = strings.Join(cfg.ProcessNames, ",")
 	evidence["cfg_emits_permission_warning"] = strconv.FormatBool(cfg.EmitsPermissionWarning)
 	evidence["cfg_accept_startup_dialogs"] = phase2BoolPtrString(cfg.AcceptStartupDialogs)
+	evidence["cfg_auto_approve_acp_permissions"] = phase2BoolPtrString(cfg.AutoApproveACPPermissions)
 	evidence["gc_dir"] = cfg.Env["GC_DIR"]
 	evidence["gc_template"] = cfg.Env["GC_TEMPLATE"]
 	evidence["gc_session_name"] = cfg.Env["GC_SESSION_NAME"]

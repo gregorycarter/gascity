@@ -54,7 +54,8 @@ const FingerprintVersion = "v5"
 //
 // Included: Command, Lifecycle, Env, FingerprintExtra (pool config, etc.),
 // PreStart, SessionSetup, SessionSetupScript, OverlayDir, effective provider
-// overlay slots, CopyFiles, AcceptStartupDialogs, MouseOn, SessionLive.
+// overlay slots, CopyFiles, AcceptStartupDialogs, AutoApproveACPPermissions,
+// MouseOn, SessionLive.
 //
 // Excluded (observation-only hints): WorkDir, ReadyPromptPrefix,
 // ReadyDelayMs, ProcessNames, EmitsPermissionWarning.
@@ -245,6 +246,7 @@ func hashCoreFields(h hash.Hash, cfg Config) {
 
 	hashOverlayProviders(h, OverlayProviderNames(cfg))
 	hashOptionalBool(h, "accept_startup_dialogs", cfg.AcceptStartupDialogs)
+	hashOptionalBool(h, "auto_approve_acp_permissions", cfg.AutoApproveACPPermissions)
 	hashBool(h, "mouse_on", cfg.MouseOn)
 
 	// CopyFiles — probed entries use ContentHash (stable when content
@@ -455,6 +457,9 @@ func CoreFingerprintBreakdown(cfg Config) BreakdownV1 {
 		}),
 		"AcceptStartupDialogs": fieldHash(func(h hash.Hash) {
 			hashOptionalBool(h, "accept_startup_dialogs", cfg.AcceptStartupDialogs)
+		}),
+		"AutoApproveACPPermissions": fieldHash(func(h hash.Hash) {
+			hashOptionalBool(h, "auto_approve_acp_permissions", cfg.AutoApproveACPPermissions)
 		}),
 		"MouseOn": fieldHash(func(h hash.Hash) {
 			hashBool(h, "mouse_on", cfg.MouseOn)

@@ -17,6 +17,11 @@ import (
 // defaultOutputBufferLines is the default circular buffer size for Peek output.
 const defaultOutputBufferLines = 1000
 
+// responseQueueSize bounds agent-to-client replies waiting for a blocked stdin
+// pipe. A single writer preserves response order without letting a burst of
+// requests create an unbounded number of blocked goroutines.
+const responseQueueSize = 64
+
 // sessionConn tracks a running ACP agent process and its JSON-RPC connection.
 type sessionConn struct {
 	cmd      *exec.Cmd
@@ -51,6 +56,15 @@ type sessionConn struct {
 	// pending tracks response waiters by request ID.
 	pending map[int64]chan JSONRPCMessage
 	idleCh  chan struct{}
+
+	// autoApprovePermissionRequests is copied from the per-session startup
+	// config. It is false unless configuration explicitly selected a
+	// non-interactive approval policy.
+	autoApprovePermissionRequests bool
+
+	responseWriterOnce  sync.Once
+	responseFailureOnce sync.Once
+	responseCh          chan JSONRPCMessage
 }
 
 // newSessionConn creates a sessionConn with the given buffer size.
@@ -110,24 +124,37 @@ func (sc *sessionConn) readLoop(r io.Reader) {
 // dispatch routes a decoded JSON-RPC message.
 func (sc *sessionConn) dispatch(msg JSONRPCMessage) {
 	// Notification (no ID): handle session/update.
-	if msg.ID == nil && msg.Method == "session/update" {
+	if !msg.ID.present() && msg.Method == "session/update" {
 		sc.handleUpdate(msg)
 		return
 	}
 
+	// Request (has ID and method): the agent is asking the client something
+	// and blocks its turn until answered.
+	if msg.ID.present() && msg.Method != "" {
+		sc.handleIncomingRequest(msg)
+		return
+	}
+
 	// Response (has ID, no method): route to waiter.
-	if msg.ID != nil && msg.Method == "" {
+	if msg.ID.present() && msg.Method == "" {
+		id, ok := msg.ID.int64()
+		if !ok {
+			// All client-originated requests use numeric IDs. A response with a
+			// string or null ID cannot correlate with one of our waiters.
+			return
+		}
 		sc.mu.Lock()
-		ch, ok := sc.pending[*msg.ID]
-		if ok {
-			delete(sc.pending, *msg.ID)
+		ch, pending := sc.pending[id]
+		if pending {
+			delete(sc.pending, id)
 		}
 		// Clear busy state if this is the active prompt response.
-		if sc.activePromptID != 0 && *msg.ID == sc.activePromptID {
+		if sc.activePromptID != 0 && id == sc.activePromptID {
 			sc.markIdleLocked()
 		}
 		sc.mu.Unlock()
-		if ok {
+		if pending {
 			ch <- msg
 		}
 		return
@@ -221,19 +248,23 @@ func (sc *sessionConn) appendLine(line string) {
 // sendRequest encodes a JSON-RPC message to the agent's stdin and registers
 // a response waiter. Returns the response channel.
 func (sc *sessionConn) sendRequest(msg JSONRPCMessage) (chan JSONRPCMessage, error) {
-	if msg.ID == nil {
+	if !msg.ID.present() {
 		return nil, sc.sendNotification(msg)
+	}
+	id, ok := msg.ID.int64()
+	if !ok {
+		return nil, fmt.Errorf("outgoing ACP request has non-numeric JSON-RPC ID")
 	}
 
 	ch := make(chan JSONRPCMessage, 1)
 	sc.mu.Lock()
-	sc.pending[*msg.ID] = ch
+	sc.pending[id] = ch
 	sc.mu.Unlock()
 
 	data, err := json.Marshal(msg)
 	if err != nil {
 		sc.mu.Lock()
-		delete(sc.pending, *msg.ID)
+		delete(sc.pending, id)
 		sc.mu.Unlock()
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
@@ -243,12 +274,70 @@ func (sc *sessionConn) sendRequest(msg JSONRPCMessage) (chan JSONRPCMessage, err
 	sc.stdinMu.Unlock()
 	if err != nil {
 		sc.mu.Lock()
-		delete(sc.pending, *msg.ID)
+		delete(sc.pending, id)
 		sc.mu.Unlock()
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
 	return ch, nil
+}
+
+// enqueueResponse queues one agent-to-client response without blocking the
+// read loop on a full stdin pipe. The queue is deliberately bounded: an agent
+// that floods requests while refusing to read responses cannot make gc retain
+// an unbounded goroutine per request.
+func (sc *sessionConn) enqueueResponse(msg JSONRPCMessage) bool {
+	sc.responseWriterOnce.Do(func() {
+		sc.responseCh = make(chan JSONRPCMessage, responseQueueSize)
+		go sc.responseLoop()
+	})
+
+	select {
+	case <-sc.done:
+		return false
+	case sc.responseCh <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+// responseLoop serializes writes from the bounded agent-request response
+// queue. Process exit closes the stdin pipe, causing an in-flight write to
+// return; done then prevents any further queued response work.
+func (sc *sessionConn) responseLoop() {
+	for {
+		select {
+		case <-sc.done:
+			return
+		case msg := <-sc.responseCh:
+			if err := sc.sendResponse(msg); err != nil {
+				fmt.Fprintf(os.Stderr, "acp: responding to agent request: %v\n", err)
+				return
+			}
+		}
+	}
+}
+
+// failResponseQueue tears down a session whose agent has filled the bounded
+// response queue while stdin is blocked. Leaving that agent alive would strand
+// its pending RPC forever; terminating it lets the normal liveness path heal
+// the session instead.
+func (sc *sessionConn) failResponseQueue(method string) {
+	sc.responseFailureOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "acp: response queue full while answering %s; terminating stalled session\n", method)
+		go func() {
+			if sc.stdin != nil {
+				_ = sc.stdin.Close()
+			}
+			if sc.cmd == nil {
+				return
+			}
+			if err := terminateProcess(sc); err != nil {
+				fmt.Fprintf(os.Stderr, "acp: terminating stalled response queue: %v\n", err)
+			}
+		}()
+	})
 }
 
 // sendNotification encodes a JSON-RPC notification (no response expected).

@@ -231,10 +231,11 @@ func lookupProvider(name string, cityProviders map[string]ProviderSpec, lookPath
 // when non-nil. Map fields (Env, PermissionModes) merge additively (city keys
 // override base keys).
 //
-// Capability bools (EmitsPermissionWarning, SupportsACP, SupportsHooks)
-// are tri-state *bool: nil = inherit base, &true = enable, &false =
-// explicit disable. A child that sets `supports_hooks = false` now
-// suppresses the feature even when inherited from a built-in with &true.
+// Behavior and capability bools (EmitsPermissionWarning, AcceptStartupDialogs,
+// AutoApproveACPPermissions, SupportsACP, SupportsHooks) are tri-state *bool:
+// nil = inherit base, &true = enable, &false = explicit disable. A child that
+// sets `supports_hooks = false` now suppresses the feature even when inherited
+// from a built-in with &true.
 func MergeProviderOverBuiltin(base, city ProviderSpec) ProviderSpec {
 	result := base
 
@@ -276,6 +277,9 @@ func MergeProviderOverBuiltin(base, city ProviderSpec) ProviderSpec {
 	}
 	if city.AcceptStartupDialogs != nil {
 		result.AcceptStartupDialogs = cloneBoolPtr(city.AcceptStartupDialogs)
+	}
+	if city.AutoApproveACPPermissions != nil {
+		result.AutoApproveACPPermissions = cloneBoolPtr(city.AutoApproveACPPermissions)
 	}
 	if city.PathCheck != "" {
 		result.PathCheck = city.PathCheck
@@ -618,25 +622,26 @@ func detectProviderName(lookPath LookPathFunc) (string, error) {
 // specToResolved converts a ProviderSpec to a ResolvedProvider.
 func specToResolved(name string, spec *ProviderSpec) *ResolvedProvider {
 	rp := &ResolvedProvider{
-		Name:                   name,
-		Command:                spec.Command,
-		PromptMode:             spec.PromptMode,
-		PromptFlag:             spec.PromptFlag,
-		ReadyDelayMs:           spec.ReadyDelayMs,
-		ReadyPromptPrefix:      spec.ReadyPromptPrefix,
-		EmitsPermissionWarning: derefBool(spec.EmitsPermissionWarning),
-		AcceptStartupDialogs:   cloneBoolPtr(spec.AcceptStartupDialogs),
-		SupportsACP:            derefBool(spec.SupportsACP),
-		SupportsHooks:          derefBool(spec.SupportsHooks),
-		InstructionsFile:       spec.InstructionsFile,
-		ResumeFlag:             spec.ResumeFlag,
-		ResumeStyle:            spec.ResumeStyle,
-		ResumeCommand:          spec.ResumeCommand,
-		SessionIDFlag:          spec.SessionIDFlag,
-		ForkFlag:               spec.ForkFlag,
-		TitleModel:             spec.TitleModel,
-		ACPCommand:             spec.ACPCommand,
-		UpstreamEnv:            spec.UpstreamEnv,
+		Name:                      name,
+		Command:                   spec.Command,
+		PromptMode:                spec.PromptMode,
+		PromptFlag:                spec.PromptFlag,
+		ReadyDelayMs:              spec.ReadyDelayMs,
+		ReadyPromptPrefix:         spec.ReadyPromptPrefix,
+		EmitsPermissionWarning:    derefBool(spec.EmitsPermissionWarning),
+		AcceptStartupDialogs:      cloneBoolPtr(spec.AcceptStartupDialogs),
+		AutoApproveACPPermissions: cloneBoolPtr(spec.AutoApproveACPPermissions),
+		SupportsACP:               derefBool(spec.SupportsACP),
+		SupportsHooks:             derefBool(spec.SupportsHooks),
+		InstructionsFile:          spec.InstructionsFile,
+		ResumeFlag:                spec.ResumeFlag,
+		ResumeStyle:               spec.ResumeStyle,
+		ResumeCommand:             spec.ResumeCommand,
+		SessionIDFlag:             spec.SessionIDFlag,
+		ForkFlag:                  spec.ForkFlag,
+		TitleModel:                spec.TitleModel,
+		ACPCommand:                spec.ACPCommand,
+		UpstreamEnv:               spec.UpstreamEnv,
 	}
 	// Deep-copy OptionsSchema to avoid aliasing the spec's slice.
 	if len(spec.OptionsSchema) > 0 {
@@ -841,6 +846,9 @@ func resolvedChainToSpec(r ResolvedProvider, leaf ProviderSpec) ProviderSpec {
 	}
 	if leaf.AcceptStartupDialogs == nil && providerBoolFieldSet(r, "accept_startup_dialogs") {
 		out.AcceptStartupDialogs = cloneBoolPtr(r.AcceptStartupDialogs)
+	}
+	if leaf.AutoApproveACPPermissions == nil && providerBoolFieldSet(r, "auto_approve_acp_permissions") {
+		out.AutoApproveACPPermissions = cloneBoolPtr(r.AutoApproveACPPermissions)
 	}
 	if leaf.SupportsACP == nil && providerBoolFieldSet(r, "supports_acp") {
 		v := r.SupportsACP

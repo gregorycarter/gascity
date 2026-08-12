@@ -14,6 +14,9 @@ type StartupHints struct {
 	ProcessNames           []string
 	EmitsPermissionWarning bool
 	AcceptStartupDialogs   *bool
+	// AutoApproveACPPermissions carries the resolved provider ACP permission
+	// policy. Nil and false keep the runtime in rejection-by-default mode.
+	AutoApproveACPPermissions *bool
 	// MouseOn reports whether tmux mouse mode should be preserved for this session.
 	MouseOn bool
 	// Nudge is text typed into the session after the agent is ready.
@@ -63,23 +66,24 @@ type StartupHints struct {
 // caller to populate.
 func (h StartupHints) ToRuntimeConfig() runtime.Config {
 	return runtime.Config{
-		Lifecycle:              h.Lifecycle,
-		ReadyPromptPrefix:      h.ReadyPromptPrefix,
-		ReadyDelayMs:           h.ReadyDelayMs,
-		ProcessNames:           h.ProcessNames,
-		EmitsPermissionWarning: h.EmitsPermissionWarning,
-		AcceptStartupDialogs:   h.AcceptStartupDialogs,
-		MouseOn:                h.MouseOn,
-		Nudge:                  h.Nudge,
-		PreStart:               h.PreStart,
-		SessionSetup:           h.SessionSetup,
-		SessionSetupScript:     h.SessionSetupScript,
-		SessionLive:            h.SessionLive,
-		ProviderName:           h.ProviderName,
-		ProviderOverlayName:    h.ProviderOverlayName,
-		InstallAgentHooks:      h.InstallAgentHooks,
-		PackOverlayDirs:        h.PackOverlayDirs,
-		OverlayDir:             h.OverlayDir,
-		CopyFiles:              h.CopyFiles,
+		Lifecycle:                 h.Lifecycle,
+		ReadyPromptPrefix:         h.ReadyPromptPrefix,
+		ReadyDelayMs:              h.ReadyDelayMs,
+		ProcessNames:              h.ProcessNames,
+		EmitsPermissionWarning:    h.EmitsPermissionWarning,
+		AcceptStartupDialogs:      h.AcceptStartupDialogs,
+		AutoApproveACPPermissions: h.AutoApproveACPPermissions,
+		MouseOn:                   h.MouseOn,
+		Nudge:                     h.Nudge,
+		PreStart:                  h.PreStart,
+		SessionSetup:              h.SessionSetup,
+		SessionSetupScript:        h.SessionSetupScript,
+		SessionLive:               h.SessionLive,
+		ProviderName:              h.ProviderName,
+		ProviderOverlayName:       h.ProviderOverlayName,
+		InstallAgentHooks:         h.InstallAgentHooks,
+		PackOverlayDirs:           h.PackOverlayDirs,
+		OverlayDir:                h.OverlayDir,
+		CopyFiles:                 h.CopyFiles,
 	}
 }

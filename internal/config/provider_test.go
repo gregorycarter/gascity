@@ -200,6 +200,9 @@ func TestBuiltinProvidersKimi(t *testing.T) {
 	if p.AcceptStartupDialogs == nil || *p.AcceptStartupDialogs {
 		t.Errorf("AcceptStartupDialogs = %v, want false", p.AcceptStartupDialogs)
 	}
+	if p.AutoApproveACPPermissions == nil || !*p.AutoApproveACPPermissions {
+		t.Errorf("AutoApproveACPPermissions = %v, want true for Kimi's --yolo ACP launch", p.AutoApproveACPPermissions)
+	}
 	if !reflect.DeepEqual(p.ACPArgs, []string{"--yolo", "--no-thinking", "acp"}) {
 		t.Errorf("ACPArgs = %v, want [--yolo --no-thinking acp]", p.ACPArgs)
 	}

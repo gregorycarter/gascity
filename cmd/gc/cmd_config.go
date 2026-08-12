@@ -729,6 +729,7 @@ func renderProviderExplainText(w io.Writer, r config.ResolvedProvider, name stri
 	explainResolvedBool(w, "supports_acp", r.SupportsACP, r.Provenance.FieldLayer["supports_acp"])
 	explainResolvedBool(w, "emits_permission_warning", r.EmitsPermissionWarning, r.Provenance.FieldLayer["emits_permission_warning"])
 	explainResolvedBoolPtr(w, "accept_startup_dialogs", r.AcceptStartupDialogs, r.Provenance.FieldLayer["accept_startup_dialogs"])
+	explainResolvedBoolPtr(w, "auto_approve_acp_permissions", r.AutoApproveACPPermissions, r.Provenance.FieldLayer["auto_approve_acp_permissions"])
 
 	explainProviderMap(w, "env", r.Env, r.Provenance.MapKeyLayer["env"])
 	explainProviderMap(w, "permission_modes", r.PermissionModes, r.Provenance.MapKeyLayer["permission_modes"])
@@ -819,25 +820,26 @@ func renderProviderExplainJSON(r config.ResolvedProvider, name string, stdout, s
 		"builtin_ancestor": r.BuiltinAncestor,
 		"chain":            chain,
 		"resolved": map[string]any{
-			"command":                  r.Command,
-			"args":                     r.Args,
-			"prompt_mode":              r.PromptMode,
-			"prompt_flag":              r.PromptFlag,
-			"ready_delay_ms":           r.ReadyDelayMs,
-			"ready_prompt_prefix":      r.ReadyPromptPrefix,
-			"process_names":            r.ProcessNames,
-			"resume_command":           r.ResumeCommand,
-			"resume_flag":              r.ResumeFlag,
-			"resume_style":             r.ResumeStyle,
-			"session_id_flag":          r.SessionIDFlag,
-			"title_model":              r.TitleModel,
-			"supports_hooks":           triStateFromProvenance("supports_hooks", r.SupportsHooks),
-			"supports_acp":             triStateFromProvenance("supports_acp", r.SupportsACP),
-			"emits_permission_warning": triStateFromProvenance("emits_permission_warning", r.EmitsPermissionWarning),
-			"accept_startup_dialogs":   r.AcceptStartupDialogs,
-			"env":                      r.Env,
-			"permission_modes":         r.PermissionModes,
-			"option_defaults":          r.EffectiveDefaults,
+			"command":                      r.Command,
+			"args":                         r.Args,
+			"prompt_mode":                  r.PromptMode,
+			"prompt_flag":                  r.PromptFlag,
+			"ready_delay_ms":               r.ReadyDelayMs,
+			"ready_prompt_prefix":          r.ReadyPromptPrefix,
+			"process_names":                r.ProcessNames,
+			"resume_command":               r.ResumeCommand,
+			"resume_flag":                  r.ResumeFlag,
+			"resume_style":                 r.ResumeStyle,
+			"session_id_flag":              r.SessionIDFlag,
+			"title_model":                  r.TitleModel,
+			"supports_hooks":               triStateFromProvenance("supports_hooks", r.SupportsHooks),
+			"supports_acp":                 triStateFromProvenance("supports_acp", r.SupportsACP),
+			"emits_permission_warning":     triStateFromProvenance("emits_permission_warning", r.EmitsPermissionWarning),
+			"accept_startup_dialogs":       r.AcceptStartupDialogs,
+			"auto_approve_acp_permissions": r.AutoApproveACPPermissions,
+			"env":                          r.Env,
+			"permission_modes":             r.PermissionModes,
+			"option_defaults":              r.EffectiveDefaults,
 		},
 		"provenance": map[string]any{
 			"field_layer":   r.Provenance.FieldLayer,

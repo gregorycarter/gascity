@@ -694,6 +694,7 @@ ProviderSpec defines a named provider's startup parameters.
 | `process_names` | []string |  |  | ProcessNames lists process names to look for when checking if the provider is running. |
 | `emits_permission_warning` | boolean |  |  | EmitsPermissionWarning is tri-state: nil = inherit, &true = enable, &false = explicit disable. |
 | `accept_startup_dialogs` | boolean |  |  | AcceptStartupDialogs is tri-state: nil = default startup dialog handling, &true = force dialog acceptance, &false = suppress it for providers that handle permissions entirely through launch flags. |
+| `auto_approve_acp_permissions` | boolean |  |  | AutoApproveACPPermissions is tri-state: nil = reject ACP permission requests by default, &true = select an allow option, &false = explicitly select a reject option. Enable it only for a provider launch whose own configuration deliberately grants non-interactive tool permissions. |
 | `env` | map[string]string |  |  | Env sets additional environment variables for the provider process. |
 | `path_check` | string |  |  | PathCheck overrides the binary name used for PATH detection. When set, lookupProvider and detectProviderName use this instead of Command for exec.LookPath checks. Useful when Command is a shell wrapper (e.g. sh -c '...') but we need to verify the real binary is installed. |
 | `supports_acp` | boolean |  |  | SupportsACP indicates the binary speaks the Agent Client Protocol (JSON-RPC 2.0 over stdio). When an agent sets session = "acp", its resolved provider must have SupportsACP = true. |

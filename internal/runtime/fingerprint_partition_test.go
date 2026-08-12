@@ -23,6 +23,7 @@ var partitionHalfCases = []struct {
 		c.MCPServers = []MCPServerConfig{{Name: "mail", Transport: MCPTransport("stdio"), Command: "different-mcp"}}
 	}},
 	{"AcceptStartupDialogs", "launch", func(c *Config) { b := false; c.AcceptStartupDialogs = &b }},
+	{"AutoApproveACPPermissions", "launch", func(c *Config) { b := true; c.AutoApproveACPPermissions = &b }},
 	{"MouseOn", "launch", func(c *Config) { c.MouseOn = !c.MouseOn }},
 	// SessionSetup/SessionSetupScript are LAUNCH-half (B2): the carriers replay
 	// them on relaunch, so a change relaunches rather than reprovisions.
@@ -92,14 +93,15 @@ func TestFingerprintPartitionCoversCoreDisjointly(t *testing.T) {
 // classified provision here and ProviderOverlayName is the behavioral witness.
 var coreFieldHalf = map[string]string{
 	// LAUNCH (agent) half.
-	"Command":              "launch",
-	"Lifecycle":            "launch",
-	"Upstream":             "launch",
-	"MCPServers":           "launch",
-	"AcceptStartupDialogs": "launch",
-	"MouseOn":              "launch",
-	"SessionSetup":         "launch",
-	"SessionSetupScript":   "launch",
+	"Command":                   "launch",
+	"Lifecycle":                 "launch",
+	"Upstream":                  "launch",
+	"MCPServers":                "launch",
+	"AcceptStartupDialogs":      "launch",
+	"AutoApproveACPPermissions": "launch",
+	"MouseOn":                   "launch",
+	"SessionSetup":              "launch",
+	"SessionSetupScript":        "launch",
 	// PROVISION (box) half.
 	"Env":                 "provision",
 	"FingerprintExtra":    "provision",

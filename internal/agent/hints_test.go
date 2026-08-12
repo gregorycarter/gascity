@@ -63,24 +63,25 @@ func setNonZero(t *testing.T, name string, v reflect.Value) {
 func TestStartupHintsToRuntimeConfigCopiesValues(t *testing.T) {
 	accept := true
 	hints := StartupHints{
-		Lifecycle:              "oneshot",
-		ReadyPromptPrefix:      "> ",
-		ReadyDelayMs:           250,
-		ProcessNames:           []string{"agent-cli"},
-		EmitsPermissionWarning: true,
-		AcceptStartupDialogs:   &accept,
-		MouseOn:                true,
-		Nudge:                  "go",
-		PreStart:               []string{"mkdir -p x"},
-		SessionSetup:           []string{"echo setup"},
-		SessionSetupScript:     "/tmp/setup.sh",
-		SessionLive:            []string{"tmux set -g status on"},
-		ProviderName:           "claude",
-		ProviderOverlayName:    "claude-custom",
-		InstallAgentHooks:      []string{"gemini"},
-		PackOverlayDirs:        []string{"/pack/overlay"},
-		OverlayDir:             "/agent/overlay",
-		CopyFiles:              make([]runtime.CopyEntry, 1),
+		Lifecycle:                 "oneshot",
+		ReadyPromptPrefix:         "> ",
+		ReadyDelayMs:              250,
+		ProcessNames:              []string{"agent-cli"},
+		EmitsPermissionWarning:    true,
+		AcceptStartupDialogs:      &accept,
+		AutoApproveACPPermissions: &accept,
+		MouseOn:                   true,
+		Nudge:                     "go",
+		PreStart:                  []string{"mkdir -p x"},
+		SessionSetup:              []string{"echo setup"},
+		SessionSetupScript:        "/tmp/setup.sh",
+		SessionLive:               []string{"tmux set -g status on"},
+		ProviderName:              "claude",
+		ProviderOverlayName:       "claude-custom",
+		InstallAgentHooks:         []string{"gemini"},
+		PackOverlayDirs:           []string{"/pack/overlay"},
+		OverlayDir:                "/agent/overlay",
+		CopyFiles:                 make([]runtime.CopyEntry, 1),
 	}
 
 	cfg := hints.ToRuntimeConfig()
@@ -102,6 +103,9 @@ func TestStartupHintsToRuntimeConfigCopiesValues(t *testing.T) {
 	}
 	if cfg.AcceptStartupDialogs == nil || !*cfg.AcceptStartupDialogs {
 		t.Errorf("AcceptStartupDialogs = %v, want ptr to true", cfg.AcceptStartupDialogs)
+	}
+	if cfg.AutoApproveACPPermissions == nil || !*cfg.AutoApproveACPPermissions {
+		t.Errorf("AutoApproveACPPermissions = %v, want ptr to true", cfg.AutoApproveACPPermissions)
 	}
 	if !cfg.MouseOn {
 		t.Error("MouseOn = false, want true")

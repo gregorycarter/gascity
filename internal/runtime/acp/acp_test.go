@@ -100,6 +100,70 @@ for line in sys.stdin:
 '`
 }
 
+// permissionRequestACPShellCommand pauses a prompt on a real ACP permission
+// request, then completes it only after the client responds with an allow
+// option. This exercises the bidirectional stdio path end to end.
+func permissionRequestACPShellCommand() string {
+	return `exec python3 -u -c '
+import sys, json
+
+session_id = "test-session-1"
+permission_id = 77
+prompt_id = None
+
+def respond(id, result):
+    print(json.dumps({"jsonrpc": "2.0", "id": id, "result": result}), flush=True)
+
+def notify(text):
+    print(json.dumps({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": text}
+            }
+        }
+    }), flush=True)
+
+for line in sys.stdin:
+    try:
+        msg = json.loads(line)
+    except:
+        continue
+    method = msg.get("method", "")
+    msg_id = msg.get("id")
+    if method == "initialize":
+        respond(msg_id, {"serverInfo": {"name": "fakeacp", "version": "1.0"}})
+    elif method == "session/new":
+        respond(msg_id, {"sessionId": session_id})
+    elif method == "session/prompt":
+        prompt_id = msg_id
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "id": permission_id,
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": session_id,
+                "toolCall": {"toolCallId": "call-1", "status": "pending", "title": "write"},
+                "options": [
+                    {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"}
+                ]
+            }
+        }), flush=True)
+    elif msg_id == permission_id:
+        outcome = msg.get("result", {}).get("outcome", {})
+        if outcome.get("outcome") == "selected" and outcome.get("optionId") == "allow":
+            notify("permission accepted")
+        else:
+            notify("permission rejected")
+        respond(prompt_id, {})
+        break
+'`
+}
+
 func TestStart_HandshakeSuccess(t *testing.T) {
 	p := newTestProvider(t)
 	name := testName()
@@ -267,6 +331,52 @@ func TestNudge_SendsPrompt(t *testing.T) {
 
 	if !strings.Contains(output, "echo: hello world") {
 		t.Errorf("Peek output = %q, want to contain %q", output, "echo: hello world")
+	}
+}
+
+func TestNudgeCompletesWhenAgentRequestsPermission(t *testing.T) {
+	raw := newTestProvider(t)
+	p := seamBack(raw)
+	name := testName()
+	autoApprove := true
+	if err := p.Start(context.Background(), name, runtime.Config{
+		Command:                   permissionRequestACPShellCommand(),
+		WorkDir:                   t.TempDir(),
+		AutoApproveACPPermissions: &autoApprove,
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Stop(name) })
+
+	raw.mu.Lock()
+	sc := raw.conns[name]
+	raw.mu.Unlock()
+	if sc == nil {
+		t.Fatal("started session connection was not recorded")
+	}
+
+	if err := p.Nudge(name, runtime.TextContent("use a tool")); err != nil {
+		t.Fatalf("Nudge: %v", err)
+	}
+	if !sc.waitIdle(testutil.GoroutineRaceTimeout) {
+		t.Fatal("prompt stayed busy: ACP permission request was not resolved")
+	}
+
+	output, err := p.Peek(name, 0)
+	if err != nil {
+		t.Fatalf("Peek: %v", err)
+	}
+	if !strings.Contains(output, "permission accepted") {
+		t.Fatalf("agent output = %q, want permission accepted", output)
+	}
+
+	select {
+	case <-sc.done:
+	case <-time.After(testutil.GoroutineRaceTimeout):
+		t.Fatal("timed out waiting for the ACP agent process to exit")
+	}
+	if got := runtime.ObserveLiveness(p, name, []string{"kimi"}); got.Running || got.Alive {
+		t.Fatalf("ObserveLiveness = %+v after the ACP agent exited, want not running and not alive", got)
 	}
 }
 
@@ -809,13 +919,13 @@ func TestDispatch_RoutesResponseToWaiter(t *testing.T) {
 	result, _ := json.Marshal(map[string]string{"ok": "true"})
 	sc.dispatch(JSONRPCMessage{
 		JSONRPC: "2.0",
-		ID:      &id,
+		ID:      numericJSONRPCID(id),
 		Result:  result,
 	})
 
 	select {
 	case resp := <-ch:
-		if resp.ID == nil || *resp.ID != 7 {
+		if responseID, ok := resp.ID.int64(); !ok || responseID != 7 {
 			t.Errorf("response ID = %v, want 7", resp.ID)
 		}
 	default:
@@ -838,7 +948,7 @@ func TestDispatch_ClearsActivePromptOnResponse(t *testing.T) {
 
 	sc.dispatch(JSONRPCMessage{
 		JSONRPC: "2.0",
-		ID:      &id,
+		ID:      numericJSONRPCID(id),
 		Result:  json.RawMessage(`{}`),
 	})
 

@@ -87,6 +87,11 @@ type ProviderSpec struct {
 	// &true = force dialog acceptance, &false = suppress it for providers that
 	// handle permissions entirely through launch flags.
 	AcceptStartupDialogs *bool `toml:"accept_startup_dialogs,omitempty"`
+	// AutoApproveACPPermissions is tri-state: nil = reject ACP permission
+	// requests by default, &true = select an allow option, &false = explicitly
+	// select a reject option. Enable it only for a provider launch whose own
+	// configuration deliberately grants non-interactive tool permissions.
+	AutoApproveACPPermissions *bool `toml:"auto_approve_acp_permissions,omitempty"`
 	// Env sets additional environment variables for the provider process.
 	Env map[string]string `toml:"env,omitempty"`
 	// PathCheck overrides the binary name used for PATH detection.
@@ -223,22 +228,25 @@ type ResolvedProvider struct {
 	ProcessNames           []string
 	EmitsPermissionWarning bool
 	AcceptStartupDialogs   *bool
-	Env                    map[string]string
-	SupportsACP            bool
-	SupportsHooks          bool
-	InstructionsFile       string
-	ResumeFlag             string
-	ResumeStyle            string
-	ResumeCommand          string
-	SessionIDFlag          string
-	ForkFlag               string
-	PermissionModes        map[string]string
-	OptionsSchema          []ProviderOption
-	UpstreamEnv            UpstreamEnvBinding
-	PrintArgs              []string
-	TitleModel             string
-	ACPCommand             string
-	ACPArgs                []string
+	// AutoApproveACPPermissions is the resolved provider policy for structured
+	// ACP tool-call permission requests.
+	AutoApproveACPPermissions *bool
+	Env                       map[string]string
+	SupportsACP               bool
+	SupportsHooks             bool
+	InstructionsFile          string
+	ResumeFlag                string
+	ResumeStyle               string
+	ResumeCommand             string
+	SessionIDFlag             string
+	ForkFlag                  string
+	PermissionModes           map[string]string
+	OptionsSchema             []ProviderOption
+	UpstreamEnv               UpstreamEnvBinding
+	PrintArgs                 []string
+	TitleModel                string
+	ACPCommand                string
+	ACPArgs                   []string
 	// EffectiveDefaults is the fully-merged option default map.
 	// Computed from: schema Default -> provider OptionDefaults -> agent OptionDefaults.
 	// Used by ResolveDefaultArgs() to produce CLI flags and by the API to
@@ -458,32 +466,33 @@ func BuiltinProviderAlias(name string) ProviderSpec {
 
 func providerSpecFromWorker(spec workerbuiltin.BuiltinProviderSpec) ProviderSpec {
 	return ProviderSpec{
-		Base:                   nil,
-		ArgsAppend:             nil,
-		OptionsSchemaMerge:     "",
-		DisplayName:            spec.DisplayName,
-		Command:                spec.Command,
-		Args:                   cloneStrings(spec.Args),
-		PromptMode:             spec.PromptMode,
-		PromptFlag:             spec.PromptFlag,
-		ReadyDelayMs:           spec.ReadyDelayMs,
-		ReadyPromptPrefix:      spec.ReadyPromptPrefix,
-		ProcessNames:           cloneStrings(spec.ProcessNames),
-		EmitsPermissionWarning: boolPtr(spec.EmitsPermissionWarning),
-		AcceptStartupDialogs:   cloneBoolPtr(spec.AcceptStartupDialogs),
-		Env:                    cloneStringMap(spec.Env),
-		PathCheck:              spec.PathCheck,
-		SupportsACP:            boolPtr(spec.SupportsACP),
-		SupportsHooks:          boolPtr(spec.SupportsHooks),
-		InstructionsFile:       spec.InstructionsFile,
-		ResumeFlag:             spec.ResumeFlag,
-		ResumeStyle:            spec.ResumeStyle,
-		ResumeCommand:          spec.ResumeCommand,
-		SessionIDFlag:          spec.SessionIDFlag,
-		ForkFlag:               spec.ForkFlag,
-		PermissionModes:        cloneStringMap(spec.PermissionModes),
-		OptionDefaults:         cloneStringMap(spec.OptionDefaults),
-		OptionsSchema:          providerOptionsFromWorker(spec.OptionsSchema),
+		Base:                      nil,
+		ArgsAppend:                nil,
+		OptionsSchemaMerge:        "",
+		DisplayName:               spec.DisplayName,
+		Command:                   spec.Command,
+		Args:                      cloneStrings(spec.Args),
+		PromptMode:                spec.PromptMode,
+		PromptFlag:                spec.PromptFlag,
+		ReadyDelayMs:              spec.ReadyDelayMs,
+		ReadyPromptPrefix:         spec.ReadyPromptPrefix,
+		ProcessNames:              cloneStrings(spec.ProcessNames),
+		EmitsPermissionWarning:    boolPtr(spec.EmitsPermissionWarning),
+		AcceptStartupDialogs:      cloneBoolPtr(spec.AcceptStartupDialogs),
+		AutoApproveACPPermissions: cloneBoolPtr(spec.AutoApproveACPPermissions),
+		Env:                       cloneStringMap(spec.Env),
+		PathCheck:                 spec.PathCheck,
+		SupportsACP:               boolPtr(spec.SupportsACP),
+		SupportsHooks:             boolPtr(spec.SupportsHooks),
+		InstructionsFile:          spec.InstructionsFile,
+		ResumeFlag:                spec.ResumeFlag,
+		ResumeStyle:               spec.ResumeStyle,
+		ResumeCommand:             spec.ResumeCommand,
+		SessionIDFlag:             spec.SessionIDFlag,
+		ForkFlag:                  spec.ForkFlag,
+		PermissionModes:           cloneStringMap(spec.PermissionModes),
+		OptionDefaults:            cloneStringMap(spec.OptionDefaults),
+		OptionsSchema:             providerOptionsFromWorker(spec.OptionsSchema),
 		UpstreamEnv: UpstreamEnvBinding{
 			BaseURL:   spec.UpstreamBaseURLEnv,
 			APIKey:    spec.UpstreamAPIKeyEnv,

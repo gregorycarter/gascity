@@ -114,12 +114,13 @@ func workerSessionCreateHints(resolved *config.ResolvedProvider) runtime.Config 
 		return runtime.Config{}
 	}
 	hints := agent.StartupHints{
-		Lifecycle:              runtime.Lifecycle(resolved.Lifecycle),
-		ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
-		ReadyDelayMs:           resolved.ReadyDelayMs,
-		ProcessNames:           resolved.ProcessNames,
-		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
-		AcceptStartupDialogs:   resolved.AcceptStartupDialogs,
+		Lifecycle:                 runtime.Lifecycle(resolved.Lifecycle),
+		ReadyPromptPrefix:         resolved.ReadyPromptPrefix,
+		ReadyDelayMs:              resolved.ReadyDelayMs,
+		ProcessNames:              resolved.ProcessNames,
+		EmitsPermissionWarning:    resolved.EmitsPermissionWarning,
+		AcceptStartupDialogs:      resolved.AcceptStartupDialogs,
+		AutoApproveACPPermissions: resolved.AutoApproveACPPermissions,
 		// ga-c4w: the unmanaged `gc session new` direct-start path (controller
 		// down) builds its runtime hints here. Default interactive CLI creates to
 		// mouse-on so the tmux wheel drives copy-mode scrollback. Pool/headless
@@ -629,13 +630,14 @@ func resolvedWorkerRuntimeWithConfigAndMetadata(cityPath string, cfg *config.Cit
 	// resumed sessions re-theme; closing the remaining create-time field gap
 	// is the internal/worker.Factory population follow-up.
 	runtimeHints := agent.StartupHints{
-		Lifecycle:              runtime.Lifecycle(resolved.Lifecycle),
-		ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
-		ReadyDelayMs:           resolved.ReadyDelayMs,
-		ProcessNames:           resolved.ProcessNames,
-		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
-		AcceptStartupDialogs:   resolved.AcceptStartupDialogs,
-		SessionLive:            sessionLive,
+		Lifecycle:                 runtime.Lifecycle(resolved.Lifecycle),
+		ReadyPromptPrefix:         resolved.ReadyPromptPrefix,
+		ReadyDelayMs:              resolved.ReadyDelayMs,
+		ProcessNames:              resolved.ProcessNames,
+		EmitsPermissionWarning:    resolved.EmitsPermissionWarning,
+		AcceptStartupDialogs:      resolved.AcceptStartupDialogs,
+		AutoApproveACPPermissions: resolved.AutoApproveACPPermissions,
+		SessionLive:               sessionLive,
 	}.ToRuntimeConfig()
 	runtimeHints.WorkDir = workDir
 	runtimeHints.Env = sessionEnv

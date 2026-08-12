@@ -103,7 +103,7 @@ func TestActivityPublicationDoesNotBlockJSONRPCDispatch(t *testing.T) {
 
 	dispatched := make(chan struct{})
 	go func() {
-		sc.dispatch(JSONRPCMessage{JSONRPC: "2.0", ID: &id})
+		sc.dispatch(JSONRPCMessage{JSONRPC: "2.0", ID: numericJSONRPCID(id)})
 		close(dispatched)
 	}()
 	waitForActivityTest(t, dispatched, "JSON-RPC response dispatch")

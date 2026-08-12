@@ -1787,6 +1787,8 @@ func deepCopyProviderSpec(in ProviderSpec) ProviderSpec {
 	}
 	out.Base = copyStringPtr(in.Base)
 	out.EmitsPermissionWarning = copyBoolPtr(in.EmitsPermissionWarning)
+	out.AcceptStartupDialogs = copyBoolPtr(in.AcceptStartupDialogs)
+	out.AutoApproveACPPermissions = copyBoolPtr(in.AutoApproveACPPermissions)
 	out.SupportsACP = copyBoolPtr(in.SupportsACP)
 	out.SupportsHooks = copyBoolPtr(in.SupportsHooks)
 	return out

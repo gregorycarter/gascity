@@ -29,7 +29,8 @@ import (
 //	PROVISION (box):  Env (allow-listed), FingerprintExtra, PreStart,
 //	                  OverlayDir, OverlayProviders, CopyFiles.
 //	LAUNCH (agent):   Command, Lifecycle, Upstream, MCPServers,
-//	                  AcceptStartupDialogs, MouseOn, SessionSetup,
+//	                  AcceptStartupDialogs, AutoApproveACPPermissions, MouseOn,
+//	                  SessionSetup,
 //	                  SessionSetupScript.
 //
 // SessionSetup/SessionSetupScript are LAUNCH-half as of B2: the carriers now
@@ -109,6 +110,7 @@ func hashLaunchFields(h hash.Hash, cfg Config) {
 
 	hashMCPServers(h, cfg.MCPServers)
 	hashOptionalBool(h, "accept_startup_dialogs", cfg.AcceptStartupDialogs)
+	hashOptionalBool(h, "auto_approve_acp_permissions", cfg.AutoApproveACPPermissions)
 	hashBool(h, "mouse_on", cfg.MouseOn)
 
 	// SessionSetup + SessionSetupScript are LAUNCH-half (B2): the carriers replay
