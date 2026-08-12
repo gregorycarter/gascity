@@ -3525,6 +3525,47 @@ func TestSendResumesSuspendedACPSessionOnACPBackend(t *testing.T) {
 	}
 }
 
+func TestStartRuntimeOnlyUnroutesStaleACPRouteForTmuxTransport(t *testing.T) {
+	store := beads.NewMemStore()
+	defaultSP := runtime.NewFake()
+	acpSP := runtime.NewFake()
+	autoSP := sessionauto.New(defaultSP, acpSP)
+	mgr := NewManagerWithOptions(store, autoSP)
+
+	const sessionName = "bridge_town_core--gastown__witness"
+	bead, err := store.Create(beads.Bead{
+		Title:  "bridge witness",
+		Type:   BeadType,
+		Labels: []string{LabelSession},
+		Metadata: map[string]string{
+			"session_name":         sessionName,
+			"session_origin":       "named",
+			"state":                string(StateStartPending),
+			"provider":             "kimi",
+			"transport":            "tmux",
+			"work_dir":             "/tmp",
+			"pending_create_claim": "true",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create named session bead: %v", err)
+	}
+
+	// The provider-construction snapshot can have registered the canonical
+	// name to ACP before the rig-scoped tmux override materializes.
+	autoSP.RouteACP(sessionName)
+
+	if err := mgr.StartRuntimeOnly(context.Background(), bead.ID, "kimi --yolo --no-thinking", runtime.Config{WorkDir: "/tmp"}); err != nil {
+		t.Fatalf("StartRuntimeOnly: %v", err)
+	}
+	if !defaultSP.IsRunning(sessionName) {
+		t.Fatalf("default backend should own tmux session %q", sessionName)
+	}
+	if acpSP.IsRunning(sessionName) {
+		t.Fatalf("ACP backend should not own tmux session %q", sessionName)
+	}
+}
+
 func TestSendReRoutesActiveACPSessionBeforeNudge(t *testing.T) {
 	store := beads.NewMemStore()
 	defaultSP := runtime.NewFake()

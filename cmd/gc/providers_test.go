@@ -437,6 +437,46 @@ func TestConfiguredACPRouteNames_IncludeNamedSessionRuntimeNames(t *testing.T) {
 	})
 }
 
+func TestConfiguredACPRouteNames_DoesNotRoutePinnedTmuxNamedSession(t *testing.T) {
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents: []config.Agent{
+			{Name: "witness-template", Session: config.SessionTransportACP},
+		},
+		NamedSessions: []config.NamedSession{
+			{Name: "witness", Template: "witness-template"},
+		},
+	}
+	snapshot := newSessionBeadSnapshot([]beads.Bead{{
+		ID:     "session-witness",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"template":                  "witness-template",
+			"configured_named_identity": "witness",
+			"session_name":              "test-city--witness",
+			"transport":                 config.SessionTransportTmux,
+		},
+	}})
+	info, ok := snapshot.FindInfoByNamedIdentity("witness")
+	if !ok {
+		t.Fatal("FindInfoByNamedIdentity(witness) = false, want persisted named session")
+	}
+	if got := info.TransportMetadata; got != config.SessionTransportTmux {
+		t.Fatalf("transport metadata = %q, want %q", got, config.SessionTransportTmux)
+	}
+	if infoUsesACPTransport(info, cfg) {
+		t.Fatal("infoUsesACPTransport() = true, want persisted tmux transport to override config")
+	}
+	if got := configuredACPSessionNames(snapshot, "test-city", cfg.Workspace.SessionTemplate, cfg, cfg.Agents); len(got) != 0 {
+		t.Fatalf("configuredACPSessionNames() = %v, want no ACP route for persisted tmux transport", got)
+	}
+
+	if got := configuredACPRouteNames(snapshot, "test-city", cfg); len(got) != 0 {
+		t.Fatalf("configuredACPRouteNames() = %v, want no ACP route for pinned tmux session", got)
+	}
+}
+
 func TestConfiguredACPRouteNames_IncludeObservedACPProviderSessions(t *testing.T) {
 	snapshot := newSessionBeadSnapshot([]beads.Bead{{
 		Type:   sessionBeadType,

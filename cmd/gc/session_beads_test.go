@@ -577,6 +577,77 @@ mode = "always"
 	}
 }
 
+func TestSyncSessionBeads_PinsConfiguredNamedSessionTransport(t *testing.T) {
+	const sessionName = "bridge_town_core--gastown__witness"
+	desired := func() map[string]TemplateParams {
+		return map[string]TemplateParams{
+			sessionName: {
+				TemplateName:            "bridge_town_core/gastown.witness",
+				InstanceName:            "bridge_town_core/gastown.witness",
+				Alias:                   "bridge_town_core/gastown.witness",
+				Command:                 "kimi --yolo --no-thinking",
+				SessionOverride:         config.SessionTransportTmux,
+				ConfiguredNamedIdentity: "bridge_town_core/gastown.witness",
+				ConfiguredNamedMode:     "always",
+			},
+		}
+	}
+
+	t.Run("materializes tmux transport", func(t *testing.T) {
+		store := beads.NewMemStore()
+		clk := &clock.Fake{Time: time.Date(2026, 8, 12, 8, 0, 0, 0, time.UTC)}
+		var stderr bytes.Buffer
+		syncSessionBeads("", store, desired(), runtime.NewFake(), allConfiguredDS(desired()), nil, clk, &stderr, false)
+		if stderr.Len() != 0 {
+			t.Fatalf("unexpected stderr: %s", stderr.String())
+		}
+
+		all := allSessionBeads(t, store)
+		if len(all) != 1 {
+			t.Fatalf("session bead count = %d, want 1", len(all))
+		}
+		if got := all[0].Metadata["transport"]; got != config.SessionTransportTmux {
+			t.Fatalf("transport = %q, want %q", got, config.SessionTransportTmux)
+		}
+	})
+
+	t.Run("replaces stale acp transport", func(t *testing.T) {
+		store := beads.NewMemStore()
+		existing, err := store.Create(beads.Bead{
+			Title:  "bridge witness",
+			Type:   sessionBeadType,
+			Labels: []string{sessionBeadLabel},
+			Metadata: map[string]string{
+				"session_name":                  sessionName,
+				"template":                      "bridge_town_core/gastown.witness",
+				"state":                         string(session.StateAsleep),
+				"transport":                     config.SessionTransportACP,
+				"configured_named_session":      boolMetadata(true),
+				"configured_named_identity":     "bridge_town_core/gastown.witness",
+				"configured_named_session_mode": "always",
+			},
+		})
+		if err != nil {
+			t.Fatalf("create stale session bead: %v", err)
+		}
+
+		clk := &clock.Fake{Time: time.Date(2026, 8, 12, 8, 0, 0, 0, time.UTC)}
+		var stderr bytes.Buffer
+		syncSessionBeads("", store, desired(), runtime.NewFake(), allConfiguredDS(desired()), nil, clk, &stderr, false)
+		if stderr.Len() != 0 {
+			t.Fatalf("unexpected stderr: %s", stderr.String())
+		}
+
+		updated, err := store.Get(existing.ID)
+		if err != nil {
+			t.Fatalf("get updated session bead: %v", err)
+		}
+		if got := updated.Metadata["transport"]; got != config.SessionTransportTmux {
+			t.Fatalf("transport = %q, want %q", got, config.SessionTransportTmux)
+		}
+	})
+}
+
 func TestSyncSessionBeads_StampsProviderFamilyMetadata(t *testing.T) {
 	store := beads.NewMemStore()
 	clk := &clock.Fake{Time: time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC)}

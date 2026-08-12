@@ -282,6 +282,16 @@ func stampResolvedProviderSessionMetadata(meta map[string]string, resolved *conf
 	}
 }
 
+// templateParamsRuntimeTransport returns the concrete runtime transport for a
+// resolved desired session. Template resolution supports ACP and the tmux-backed
+// runtime, so a non-ACP template is always a tmux session.
+func templateParamsRuntimeTransport(tp TemplateParams) string {
+	if tp.IsACP {
+		return config.SessionTransportACP
+	}
+	return config.SessionTransportTmux
+}
+
 // queueChangedResolvedProviderSessionMetadata queues the resolved-provider
 // projection fields (provider, provider_kind, builtin_ancestor) whenever the
 // freshly resolved value differs from what is stored, mirroring the command
@@ -1722,6 +1732,7 @@ func syncSessionBeadsWithSnapshotAndRigStores(
 			})
 			meta["live_hash"] = liveHash
 			meta["session_origin"] = origin
+			meta["transport"] = templateParamsRuntimeTransport(tp)
 			meta["synced_at"] = now.Format("2006-01-02T15:04:05Z07:00")
 			if !isPoolInstance {
 				meta["session_name"] = sn
@@ -2014,6 +2025,11 @@ func syncSessionBeadsWithSnapshotAndRigStores(
 		}
 		if b.Metadata["wake_mode"] != tp.WakeMode {
 			queueMeta("wake_mode", tp.WakeMode)
+		}
+		if !tp.ManualSession {
+			if transport := templateParamsRuntimeTransport(tp); b.Metadata["transport"] != transport {
+				queueMeta("transport", transport)
+			}
 		}
 		// Backfill session_key for beads created before this fix.
 		if b.Metadata["session_key"] == "" &&

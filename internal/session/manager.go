@@ -729,11 +729,17 @@ func (m *Manager) now() time.Time {
 }
 
 func (m *Manager) routeACPIfNeeded(provider, transport, sessName string) func() {
-	if normalizeTransport(provider, transport) != "acp" {
-		return nil
-	}
 	router, ok := m.sp.(acpRouteRegistrar)
 	if !ok {
+		return nil
+	}
+	if normalizeTransport(provider, transport) != "acp" {
+		// A configured tmux transport is authoritative even when provider
+		// construction registered this canonical name as ACP from a broader
+		// config view. Drop that stale route before the runtime is started.
+		if strings.TrimSpace(transport) == "tmux" {
+			router.Unroute(sessName)
+		}
 		return nil
 	}
 	router.RouteACP(sessName)

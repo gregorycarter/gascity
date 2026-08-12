@@ -332,6 +332,9 @@ func configuredACPSessionNames(snapshot *sessionBeadSnapshot, cityName, sessionT
 		if agentSessionCreateTransport(cfg, a) != "acp" {
 			continue
 		}
+		if templateHasExplicitNonACPTransport(snapshot, a.QualifiedName()) {
+			continue
+		}
 		sessName := agent.SessionNameFor(cityName, a.QualifiedName(), sessionTemplate)
 		if snapshot != nil {
 			if beadName := snapshot.FindSessionNameByTemplate(a.QualifiedName()); beadName != "" {
@@ -341,6 +344,16 @@ func configuredACPSessionNames(snapshot *sessionBeadSnapshot, cityName, sessionT
 		names = append(names, sessName)
 	}
 	return names
+}
+
+func hasExplicitNonACPTransport(info session.Info) bool {
+	transport := strings.TrimSpace(info.TransportMetadata)
+	return transport != "" && transport != config.SessionTransportACP
+}
+
+func templateHasExplicitNonACPTransport(snapshot *sessionBeadSnapshot, template string) bool {
+	info, ok := snapshot.FindInfoByTemplate(strings.TrimSpace(template))
+	return ok && hasExplicitNonACPTransport(info)
 }
 
 func hasACPProviderTargets(cfg *config.City) bool {
@@ -472,9 +485,13 @@ func beadUsesACPTransport(bead beads.Bead, cfg *config.City) bool {
 }
 
 func infoUsesACPTransport(info session.Info, cfg *config.City) bool {
-	transport := strings.TrimSpace(info.Transport)
+	transport := strings.TrimSpace(info.TransportMetadata)
 	if transport != "" {
-		return transport == "acp"
+		return transport == config.SessionTransportACP
+	}
+	transport = strings.TrimSpace(info.Transport)
+	if transport != "" {
+		return transport == config.SessionTransportACP
 	}
 	providerName := strings.TrimSpace(info.Provider)
 	if providerName == "acp" {
@@ -544,6 +561,9 @@ func configuredACPRouteNames(snapshot *sessionBeadSnapshot, cityName string, cfg
 		sessionName := config.NamedSessionRuntimeName(cityName, cfg.Workspace, named.QualifiedName())
 		if snapshot != nil {
 			if info, ok := snapshot.FindInfoByNamedIdentity(named.QualifiedName()); ok {
+				if hasExplicitNonACPTransport(info) {
+					continue
+				}
 				if snapName := strings.TrimSpace(info.SessionNameMetadata); snapName != "" {
 					sessionName = snapName
 				}
