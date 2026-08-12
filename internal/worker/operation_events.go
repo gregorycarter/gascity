@@ -261,8 +261,7 @@ func (h *SessionHandle) operationEventRecordingEnabled() bool {
 // usageFactRecordingEnabled reports whether this handle can record usage facts,
 // i.e. it has a live (non-discard) usage sink. It is independent of
 // operationEventRecordingEnabled so model facts flow from the invocation-telemetry
-// seam on handles configured with a sink but no event recorder (the CLI factory
-// path).
+// seam on handles configured with a sink but no event recorder.
 func (h *SessionHandle) usageFactRecordingEnabled() bool {
 	return h != nil && h.usageSink != nil && h.usageSink != usage.Discard
 }

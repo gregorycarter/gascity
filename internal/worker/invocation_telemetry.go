@@ -172,8 +172,8 @@ func (h *SessionHandle) recordInvocationTelemetry(ctx context.Context) {
 	}
 	// Model usage facts flow to the configured usage sink (gc costs / external
 	// aggregators), independent of the metrics above and of operation-event
-	// recording: a sink-only handle (CLI factory path) still emits. Resolved once
-	// per loop because the gate is per-handle.
+	// recording: a sink-only handle still emits. Resolved once per loop because
+	// the gate is per-handle.
 	emitFacts := h.usageFactRecordingEnabled()
 	now := time.Now().UTC()
 	for _, u := range pending {
