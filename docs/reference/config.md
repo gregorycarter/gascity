@@ -478,8 +478,8 @@ HealConfig declares the self-healing throughput loop ([heal] in city.toml).
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `enabled` | boolean |  |  | Enabled toggles the heal loop. Defaults to false (opt-in). The controller runs the loop as a periodic watchdog when enabled; `gc heal` runs one pass regardless (so an external scheduler can drive it even when the controller is the thing that is broken). |
-| `interval` | string |  | `5m` | Interval is the cadence between controller-driven heal passes as a duration string. Defaults to 5m. |
+| `enabled` | boolean |  |  | Enabled toggles the heal loop. Defaults to false (opt-in). The orchestrator runs the loop as a periodic watchdog when enabled; `gc heal` runs one pass regardless (so an external scheduler can drive it even when the orchestrator is the thing that is broken). |
+| `interval` | string |  | `5m` | Interval is the cadence between orchestrator-driven heal passes as a duration string. Defaults to 5m. |
 | `stall_after` | string |  | `30m` | StallAfter is the throughput stall window as a duration string. A rig is stalled when no commit landed on its mainline within this window while actionable work older than the window exists. Defaults to 30m. |
 | `orphan_stale_after` | string |  | `20m` | OrphanStaleAfter is the minimum age (since last update) before an assigned-but-unclaimed routed bead is treated as orphaned and returned to the pool, and before work held by a dead session is released. Defaults to 20m. |
 | `inversion_after` | string |  | `15m` | InversionAfter is the minimum unclaimed age before a ready bead at or above InversionPriority counts as priority-inverted. Defaults to 15m. |

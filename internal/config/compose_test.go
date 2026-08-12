@@ -106,6 +106,50 @@ patrol_interval = "1m"
 	}
 }
 
+func TestLoadWithIncludesMergesHealFromFragment(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+include = ["heal.toml"]
+
+[workspace]
+name = "test"
+
+[[rigs]]
+name = "demo"
+
+[heal]
+enabled = false
+interval = "5m"
+`)
+	fs.Files["/city/heal.toml"] = []byte(`
+[heal]
+enabled = true
+interval = "2m"
+critical_sessions = ["operations"]
+
+[[heal.target]]
+rig = "demo"
+queue_addresses = ["demo/merge-queue"]
+`)
+
+	cfg, _, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	if !cfg.Heal.Enabled {
+		t.Fatal("Heal.Enabled = false, want fragment value true")
+	}
+	if cfg.Heal.Interval != "2m" {
+		t.Errorf("Heal.Interval = %q, want fragment value 2m", cfg.Heal.Interval)
+	}
+	if got := cfg.Heal.CriticalSessions; !reflect.DeepEqual(got, []string{"operations"}) {
+		t.Errorf("Heal.CriticalSessions = %v, want [operations]", got)
+	}
+	if got := cfg.Heal.Targets; len(got) != 1 || got[0].Rig != "demo" {
+		t.Errorf("Heal.Targets = %+v, want one target for demo", got)
+	}
+}
+
 func TestLoadWithIncludes_InvalidProviderChainFailsLoad(t *testing.T) {
 	fs := fsys.NewFake()
 	fs.Files["/city/city.toml"] = []byte(`

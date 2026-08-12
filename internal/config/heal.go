@@ -23,11 +23,11 @@ import (
 // from this section. The SDK supplies only the mechanics.
 type HealConfig struct {
 	// Enabled toggles the heal loop. Defaults to false (opt-in). The
-	// controller runs the loop as a periodic watchdog when enabled; `gc heal`
+	// orchestrator runs the loop as a periodic watchdog when enabled; `gc heal`
 	// runs one pass regardless (so an external scheduler can drive it even
-	// when the controller is the thing that is broken).
+	// when the orchestrator is the thing that is broken).
 	Enabled bool `toml:"enabled,omitempty"`
-	// Interval is the cadence between controller-driven heal passes as a
+	// Interval is the cadence between orchestrator-driven heal passes as a
 	// duration string. Defaults to 5m.
 	Interval string `toml:"interval,omitempty" jsonschema:"default=5m"`
 	// StallAfter is the throughput stall window as a duration string. A rig

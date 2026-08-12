@@ -1937,10 +1937,10 @@ repair work, and restart critical sessions. Every detection and action is
 recorded on the event bus (heal.stall_detected / heal.action / heal.capped);
 per-subject cooldowns and a per-pass budget prevent thrash.
 
-The controller runs this pass automatically when [heal] sets enabled = true.
+The city orchestrator runs this pass automatically when [heal] sets enabled = true.
 Running "gc heal" directly performs one pass regardless of the enabled flag,
 so an external scheduler (cron, launchd) can drive recovery even when the
-controller itself is down.
+orchestrator itself is down.
 
 ```
 gc heal [flags]
