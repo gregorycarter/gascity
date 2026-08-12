@@ -1324,7 +1324,7 @@ max_context_size = 128000
 			session:        config.SessionTransportACP,
 			optionDefaults: map[string]string{"model": "kimi-k2-thinking-turbo"},
 			config:         fullKimiConfig,
-			wantCommand:    "kimi --yolo --no-thinking acp --model kimi-k2-thinking-turbo",
+			wantCommand:    "kimi --yolo --no-thinking --model kimi-k2-thinking-turbo acp",
 		},
 		{
 			name:        "tmux leaves hooks-only config to Kimi default",
