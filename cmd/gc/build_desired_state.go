@@ -39,6 +39,15 @@ type storeScopedBeadKey struct {
 	ID       string
 }
 
+// storeScopedAssigneeKey identifies an assignee within the beads store that
+// established its readiness. An assignee can have work in both the city and a
+// rig store, but a readiness verdict from one store must not suppress the
+// Ready probe for the other.
+type storeScopedAssigneeKey struct {
+	StoreRef string
+	Assignee string
+}
+
 // ContinuationClaimCandidate is a ready graph-v2 successor that may need a
 // bounded claim nudge after its current pool session completed the preceding
 // step but did not start another turn. All fields are exact provenance:
@@ -1364,9 +1373,9 @@ func collectAssignedWorkBeadsWithStores(
 	// work as live demand. The lookup is store-scoped (result and
 	// resultStoreRefs are index-aligned), so a ready bead in one store cannot
 	// suppress the Ready probe for a same-ID assignee in another store.
-	skipReadyAssignees := readyCapturedAssigneeSet(result, resultStoreRefs, readyAssigned)
+	skipReadyAssignees := readyCapturedAssigneesByStore(result, resultStoreRefs, readyAssigned)
 	expandSkipAssigneesWithSessionIdentities(skipReadyAssignees, sessionBeads)
-	assignees := readyAssignedWorkAssignees(cfg, sessionBeads, skipReadyAssignees)
+	assignees := readyAssignedWorkAssignees(cfg, sessionBeads)
 	if len(skipReadyAssignees) > 0 && len(assignees) == 0 {
 		return result, resultStores, resultStoreRefs, readyAssigned, partial
 	}
@@ -1387,6 +1396,9 @@ func collectAssignedWorkBeadsWithStores(
 				}
 			} else {
 				for _, assignee := range assignees {
+					if _, skip := skipReadyAssignees[storeScopedAssigneeKey{StoreRef: source.ref, Assignee: assignee}]; skip {
+						continue
+					}
 					part, partErr := cache.liveReady(source.store, beads.ReadyQuery{Assignee: assignee, Limit: assignedWorkReadyLimit(cfg)})
 					if partErr != nil {
 						errs = append(errs, fmt.Errorf("Ready(assignee=%q): %w", assignee, partErr))
@@ -1426,20 +1438,20 @@ func assignedWorkReadyLimit(cfg *config.City) int {
 	return cfg.Daemon.MaxWakesPerTickOrDefault()
 }
 
-// readyCapturedAssigneeSet returns the assignees of work beads that have
-// already been captured WITH a readiness verdict in their own store (their
+// readyCapturedAssigneesByStore returns store-scoped assignees for work beads
+// that already have a readiness verdict in their own store (their
 // store-scoped key is in readyAssigned): in-progress work, assigned molecule
 // roots, and any prior Ready() match. Beads captured only by the open-routed
 // orphan-release pass are excluded, so their assignee is still probed by the
 // Ready handoff pass rather than assumed ready by virtue of having been
-// collected. The readiness lookup is store-scoped: a ready bead in one store
-// never marks a same-ID blocked bead's assignee in another store as
-// already-ready (storeScopedBeadKey). work and storeRefs are index-aligned.
-func readyCapturedAssigneeSet(work []beads.Bead, storeRefs []string, readyAssigned map[storeScopedBeadKey]bool) map[string]struct{} {
+// collected. Both the readiness lookup and the returned assignee set are
+// store-scoped: a ready bead in one store never suppresses a Ready probe for
+// that assignee in another store. work and storeRefs are index-aligned.
+func readyCapturedAssigneesByStore(work []beads.Bead, storeRefs []string, readyAssigned map[storeScopedBeadKey]bool) map[storeScopedAssigneeKey]struct{} {
 	if len(work) == 0 {
 		return nil
 	}
-	result := make(map[string]struct{})
+	result := make(map[storeScopedAssigneeKey]struct{})
 	for i, bead := range work {
 		assignee := strings.TrimSpace(bead.Assignee)
 		if assignee == "" {
@@ -1456,42 +1468,51 @@ func readyCapturedAssigneeSet(work []beads.Bead, storeRefs []string, readyAssign
 		if !readyAssigned[storeScopedBeadKey{StoreRef: storeRefs[i], ID: bead.ID}] {
 			continue
 		}
-		result[assignee] = struct{}{}
+		result[storeScopedAssigneeKey{StoreRef: storeRefs[i], Assignee: assignee}] = struct{}{}
 	}
 	return result
 }
 
-func expandSkipAssigneesWithSessionIdentities(skip map[string]struct{}, sessionBeads *sessionBeadSnapshot) {
+func expandSkipAssigneesWithSessionIdentities(skip map[storeScopedAssigneeKey]struct{}, sessionBeads *sessionBeadSnapshot) {
 	if len(skip) == 0 || sessionBeads == nil {
 		return
 	}
-	for _, info := range sessionBeads.OpenInfos() {
-		ids := sessionBeadAssigneeIdentitiesInfo(info)
-		matched := false
-		for _, id := range ids {
-			if _, ok := skip[id]; ok {
-				matched = true
-				break
+	keys := make([]storeScopedAssigneeKey, 0, len(skip))
+	for key := range skip {
+		keys = append(keys, key)
+	}
+	for i := 0; i < len(keys); i++ {
+		key := keys[i]
+		for _, info := range sessionBeads.OpenInfos() {
+			ids := sessionBeadAssigneeIdentitiesInfo(info)
+			matched := false
+			for _, id := range ids {
+				if key.Assignee == id {
+					matched = true
+					break
+				}
 			}
-		}
-		if !matched {
-			continue
-		}
-		for _, id := range ids {
-			skip[id] = struct{}{}
+			if !matched {
+				continue
+			}
+			for _, id := range ids {
+				expanded := storeScopedAssigneeKey{StoreRef: key.StoreRef, Assignee: id}
+				if _, exists := skip[expanded]; exists {
+					continue
+				}
+				skip[expanded] = struct{}{}
+				keys = append(keys, expanded)
+			}
 		}
 	}
 }
 
-func readyAssignedWorkAssignees(cfg *config.City, sessionBeads *sessionBeadSnapshot, skip map[string]struct{}) []string {
+func readyAssignedWorkAssignees(cfg *config.City, sessionBeads *sessionBeadSnapshot) []string {
 	seen := make(map[string]struct{})
 	var result []string
 	add := func(value string) {
 		value = strings.TrimSpace(value)
 		if value == "" {
-			return
-		}
-		if _, ok := skip[value]; ok {
 			return
 		}
 		if _, ok := seen[value]; ok {

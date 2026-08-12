@@ -2193,7 +2193,7 @@ func TestCollectAssignedWorkBeads_SkipsReadyProbeForInProgressAssignee(t *testin
 	}
 }
 
-func TestCollectAssignedWorkBeads_SkipsCityReadyProbeForRigInProgressAssignee(t *testing.T) {
+func TestCollectAssignedWorkBeads_SkipsReadyProbeOnlyInStoreWithInProgressAssignee(t *testing.T) {
 	cityStore := &readyQueryRecordingStore{MemStore: beads.NewMemStore()}
 	rigStore := &readyQueryRecordingStore{MemStore: beads.NewMemStore()}
 	session, err := cityStore.Create(beads.Bead{
@@ -2239,8 +2239,15 @@ func TestCollectAssignedWorkBeads_SkipsCityReadyProbeForRigInProgressAssignee(t 
 	if len(got) != 1 || got[0].ID != work.ID {
 		t.Fatalf("got = %#v, want rig in-progress work %s", got, work.ID)
 	}
-	if len(cityStore.readyQueries) != 0 || len(rigStore.readyQueries) != 0 {
-		t.Fatalf("Ready queried while cross-store in-progress work was already known: city=%#v rig=%#v", cityStore.readyQueries, rigStore.readyQueries)
+	cityQueried := make(map[string]bool)
+	for _, query := range cityStore.readyQueries {
+		cityQueried[query.Assignee] = true
+	}
+	if !cityQueried["worker-session"] {
+		t.Fatalf("city Ready queries = %#v, want a probe for worker-session", cityStore.readyQueries)
+	}
+	if len(rigStore.readyQueries) != 0 {
+		t.Fatalf("rig Ready queries = %#v, want no probe while rig in-progress work is already known", rigStore.readyQueries)
 	}
 }
 
@@ -2388,7 +2395,7 @@ func TestReadyAssignedWorkAssigneesExcludeBroadIdentities(t *testing.T) {
 			{Template: "mayor", Mode: "always"},
 			{Dir: "repo", Template: "named-worker", Mode: "on_demand"},
 		},
-	}, nil, nil)
+	}, nil)
 
 	for _, disallowed := range []string{"repo/worker", "mayor"} {
 		for _, value := range got {
@@ -6786,6 +6793,73 @@ func TestBuildDesiredState_OnDemandNamedSession_IgnoresUnreachableAssignedWork(t
 	if dsResult.NamedSessionDemand["riga/mayor"] {
 		t.Fatal("unreachable city-store assignee should not record named-session demand")
 	}
+}
+
+// A ready direct assignment in a named session's rig must not be hidden by an
+// unreachable in-progress assignment to the same identity in the city store.
+// The in-progress city bead is sufficient to skip a Ready probe only in the
+// city store; it cannot establish demand for the rig-scoped named session.
+func TestBuildDesiredState_OnDemandNamedSession_ReachableReadyWorkSurvivesUnreachableAssignment(t *testing.T) {
+	cityPath := t.TempDir()
+	rigPath := filepath.Join(cityPath, "riga")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatalf("create rig dir: %v", err)
+	}
+	cityStore := beads.NewMemStore()
+	rigStore := beads.NewMemStore()
+	identity := "riga/named-worker"
+
+	unreachable, err := cityStore.Create(beads.Bead{
+		Title:    "stale city assignment",
+		Type:     "task",
+		Status:   "open",
+		Assignee: identity,
+	})
+	if err != nil {
+		t.Fatalf("create city work: %v", err)
+	}
+	if err := cityStore.Update(unreachable.ID, beads.UpdateOpts{Status: stringPtr("in_progress")}); err != nil {
+		t.Fatalf("mark city work in progress: %v", err)
+	}
+	if _, err := rigStore.Create(beads.Bead{
+		Title:    "ready rig assignment",
+		Type:     "task",
+		Status:   "open",
+		Assignee: identity,
+	}); err != nil {
+		t.Fatalf("create rig work: %v", err)
+	}
+
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "riga", Path: rigPath}},
+		Agents: []config.Agent{{
+			Name:              "named-worker",
+			Dir:               "riga",
+			StartCommand:      "true",
+			MaxActiveSessions: intPtr(1),
+			WorkQuery:         "printf ''",
+		}},
+		NamedSessions: []config.NamedSession{{
+			Template: "named-worker",
+			Dir:      "riga",
+			Mode:     "on_demand",
+		}},
+	}
+
+	dsResult := buildDesiredStateWithSessionBeads(
+		"test-city", cityPath, time.Now().UTC(), cfg, runtime.NewFake(),
+		cityStore, map[string]beads.Store{"riga": rigStore}, nil, nil, io.Discard,
+	)
+	if !dsResult.NamedSessionDemand[identity] {
+		t.Fatalf("NamedSessionDemand[%q] = false; reachable ready rig work was suppressed by the unreachable city assignment", identity)
+	}
+	for _, tp := range dsResult.State {
+		if tp.ConfiguredNamedIdentity == identity {
+			return
+		}
+	}
+	t.Fatalf("reachable ready rig work did not materialize on-demand named session %q", identity)
 }
 
 func TestBuildDesiredState_OnDemandNamedSession_ReachabilityUsesPerBeadSourceNotID(t *testing.T) {
