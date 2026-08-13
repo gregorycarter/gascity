@@ -476,6 +476,44 @@ func TestPhase2SessionListReason_PinnedHoldStillShowsBlocker(t *testing.T) {
 	}
 }
 
+// TestPhase2SessionListReason_HeartbeatBusyHoldShowsBusyHold pins the display
+// side of the 2026-08-13 refinery user-hold display lie: a live session
+// mid-gate running its `gc runtime heartbeat` loop (future held_until, no
+// sleep_intent, no sleep_reason) must display busy-hold, not user-hold — it
+// is busy, not user-suspended.
+func TestPhase2SessionListReason_HeartbeatBusyHoldShowsBusyHold(t *testing.T) {
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents: []config.Agent{{
+			Name:         "worker",
+			StartCommand: "true",
+		}},
+	}
+	bead := beads.Bead{
+		ID:     "mc-1",
+		Status: "open",
+		Type:   session.BeadType,
+		Labels: []string{session.LabelSession},
+		Metadata: map[string]string{
+			"session_name": "test-city--worker",
+			"template":     "worker",
+			"state":        "active",
+			"held_until":   "9999-12-31T23:59:59Z",
+		},
+	}
+	info := session.Info{
+		ID:          bead.ID,
+		Template:    "worker",
+		State:       session.StateActive,
+		SessionName: "test-city--worker",
+	}
+
+	reason := sessionReason(info, map[string]session.Info{bead.ID: sessiontest.SeedBead(t, bead)}, cfg, nil, nil, nil)
+	if reason != session.LifecycleReasonBusyHold {
+		t.Fatalf("sessionReason = %q, want %q", reason, session.LifecycleReasonBusyHold)
+	}
+}
+
 func TestPhase2SessionCmdRegistersPinSubcommands(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd := newSessionCmd(&stdout, &stderr)

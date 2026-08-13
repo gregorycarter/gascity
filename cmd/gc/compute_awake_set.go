@@ -56,11 +56,15 @@ type AwakeNamedSession struct {
 
 // AwakeSessionBead represents an open session bead from the store.
 type AwakeSessionBead struct {
-	ID                        string
-	SessionName               string
-	Template                  string
-	State                     string // "creating", "active", "asleep", "drained", "closed"
-	SleepReason               string
+	ID          string
+	SessionName string
+	Template    string
+	State       string // "creating", "active", "asleep", "drained", "closed"
+	SleepReason string
+	// SleepIntent is the raw sleep_intent metadata: the #3994 discriminator
+	// between a suspend hold ("user-hold") and a heartbeat-only busy-hold
+	// (empty). Only the hold-suppression step below reads it.
+	SleepIntent               string
 	ManualSession             bool
 	PendingCreate             bool      // controller claimed this bead for initial start
 	ExplicitWake              bool      // explicit durable wake request is pending
@@ -504,10 +508,23 @@ func ComputeAwakeSet(input AwakeInput) map[string]AwakeDecision {
 			}
 		}
 
-		// Hold suppression — overrides everything
+		// Hold suppression — overrides everything, with one exception. A
+		// heartbeat-only busy-hold (future held_until with EMPTY sleep_intent —
+		// the #3994 discriminator) is an agent's busy signal, not a park: it
+		// must not suppress waking a NON-live session that has assigned work.
+		// Otherwise a session that slept mid-hold stays down for the remainder
+		// of the agent-chosen hold even though work arrived for it (the
+		// 2026-08-13 refinery user-hold display lie's wake-suppression twin).
+		// Live sessions keep the suppression — their keep-alive is the
+		// reconciler's timer-deferral path (lifecycleTimerBlockerInfo), which
+		// this does not touch — and suspend holds (sleep_intent="user-hold")
+		// always suppress.
 		if !bead.HeldUntil.IsZero() && input.Now.Before(bead.HeldUntil) {
-			decision.ShouldWake = false
-			decision.Reason = "held"
+			heartbeatBusyHold := strings.TrimSpace(bead.SleepIntent) == ""
+			if !heartbeatBusyHold || !decision.HasAssignedWork || input.RunningSessions[name] {
+				decision.ShouldWake = false
+				decision.Reason = "held"
+			}
 		}
 
 		// Quarantine suppression — overrides everything

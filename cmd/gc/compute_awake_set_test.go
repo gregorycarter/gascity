@@ -2383,3 +2383,58 @@ func TestAssignedWork_NoRecordedCurrent_FirstMatchAnchors(t *testing.T) {
 		t.Fatal("RequiresFreshCycle = true, want false — no recorded current means no divergence")
 	}
 }
+
+// TestComputeAwakeSet_HeartbeatBusyHoldWakeSuppression pins the sleep_intent
+// discriminator in hold suppression — the wake-suppression twin of the
+// 2026-08-13 refinery user-hold display lie, mirroring the #3994
+// crash-recovery arm's discriminator (future held_until + EMPTY sleep_intent
+// is a heartbeat busy-hold; sleep_intent="user-hold" is a suspend hold). A
+// session that went to sleep while a stale heartbeat hold is still in the
+// future must be woken by incoming work; a real suspend hold must keep
+// suppressing; and a LIVE heartbeat-held session keeps the suppression so the
+// reconciler's keep-alive guard (not a wake) remains the mechanism that holds
+// it up.
+func TestComputeAwakeSet_HeartbeatBusyHoldWakeSuppression(t *testing.T) {
+	heldUntil := now.Add(45 * time.Minute)
+	work := []AwakeWorkBead{{ID: "hw-1", Assignee: "mc-p1", Status: "in_progress"}}
+
+	t.Run("asleep session with stale heartbeat hold wakes for assigned work", func(t *testing.T) {
+		result := ComputeAwakeSet(AwakeInput{
+			Agents: []AwakeAgent{{QualifiedName: "hello-world/polecat"}},
+			SessionBeads: []AwakeSessionBead{
+				{ID: "mc-p1", SessionName: "polecat-mc-p1", Template: "hello-world/polecat", State: "asleep", HeldUntil: heldUntil},
+			},
+			WorkBeads: work,
+			Now:       now,
+		})
+		assertAwake(t, result, "polecat-mc-p1")
+		assertReason(t, result, "polecat-mc-p1", "assigned-work")
+	})
+
+	t.Run("suspend hold still suppresses wake for assigned work", func(t *testing.T) {
+		result := ComputeAwakeSet(AwakeInput{
+			Agents: []AwakeAgent{{QualifiedName: "hello-world/polecat"}},
+			SessionBeads: []AwakeSessionBead{
+				{ID: "mc-p1", SessionName: "polecat-mc-p1", Template: "hello-world/polecat", State: "suspended", SleepIntent: "user-hold", HeldUntil: heldUntil},
+			},
+			WorkBeads: work,
+			Now:       now,
+		})
+		assertAsleep(t, result, "polecat-mc-p1")
+		assertReason(t, result, "polecat-mc-p1", "held")
+	})
+
+	t.Run("live session with heartbeat hold keeps hold suppression", func(t *testing.T) {
+		result := ComputeAwakeSet(AwakeInput{
+			Agents: []AwakeAgent{{QualifiedName: "hello-world/polecat"}},
+			SessionBeads: []AwakeSessionBead{
+				{ID: "mc-p1", SessionName: "polecat-mc-p1", Template: "hello-world/polecat", State: "active", HeldUntil: heldUntil},
+			},
+			WorkBeads:       work,
+			RunningSessions: map[string]bool{"polecat-mc-p1": true},
+			Now:             now,
+		})
+		assertAsleep(t, result, "polecat-mc-p1")
+		assertReason(t, result, "polecat-mc-p1", "held")
+	})
+}

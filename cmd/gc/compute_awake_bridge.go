@@ -130,6 +130,7 @@ func buildAwakeInputFromReconciler(
 			Template:               normalizeAgentTemplateIdentity(cfg, info.Template),
 			State:                  string(lifecycle.CompatState),
 			SleepReason:            info.SleepReason,
+			SleepIntent:            info.SleepIntent,
 			ManualSession:          isManualSessionInfo(info),
 			PendingCreate:          lifecycle.HasWakeCause(session.WakeCausePendingCreate),
 			ExplicitWake:           lifecycle.HasWakeCause(session.WakeCauseExplicit),

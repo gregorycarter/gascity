@@ -636,9 +636,20 @@ func TestLifecycleDisplayReasonUsesOnlyActiveLifecycleReasons(t *testing.T) {
 		{
 			name: "future user hold is visible",
 			meta: map[string]string{
-				"held_until": future,
+				"held_until":   future,
+				"sleep_intent": "user-hold",
 			},
 			want: "user-hold",
+		},
+		{
+			// 2026-08-13 refinery user-hold display lie: a heartbeat-only
+			// busy-hold (future held_until, no sleep_intent) is not a user
+			// hold and must display busy-hold.
+			name: "future heartbeat busy-hold is not a user hold",
+			meta: map[string]string{
+				"held_until": future,
+			},
+			want: LifecycleReasonBusyHold,
 		},
 		{
 			name: "expired user hold is not visible",
@@ -815,8 +826,17 @@ func TestLifecycleDisplayReasonWithLivenessInfoEquivalence(t *testing.T) {
 		{
 			name:   "future user hold visible",
 			status: "open",
-			meta:   map[string]string{"held_until": future},
+			meta:   map[string]string{"held_until": future, "sleep_intent": "user-hold"},
 			want:   "user-hold",
+		},
+		{
+			// Info-twin coverage for the 2026-08-13 refinery user-hold
+			// display lie: heartbeat-only busy-hold (empty sleep_intent)
+			// displays busy-hold, not user-hold.
+			name:   "future heartbeat busy-hold is not a user hold",
+			status: "open",
+			meta:   map[string]string{"held_until": future},
+			want:   LifecycleReasonBusyHold,
 		},
 		{
 			name:   "closed suppresses reset-pending and circuit open",

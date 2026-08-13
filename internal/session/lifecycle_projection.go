@@ -104,7 +104,12 @@ const (
 type LifecycleBlocker string
 
 const (
-	// BlockerHeld means an explicit user hold prevents wake.
+	// BlockerHeld means a future held_until hold prevents wake. The key has
+	// two writers with different intents — `gc session suspend` (a real user
+	// hold, paired with sleep_intent="user-hold") and `gc runtime heartbeat`
+	// (an agent's busy signal, sleep_intent left empty) — so consumers that
+	// must tell a user hold from a heartbeat busy-hold read sleep_intent
+	// alongside this blocker (the #3994 discriminator).
 	BlockerHeld LifecycleBlocker = "held"
 	// BlockerQuarantined means churn protection prevents wake.
 	BlockerQuarantined LifecycleBlocker = "quarantined"
@@ -293,6 +298,15 @@ const (
 	LifecycleReasonResetPending = "reset-pending"
 	// LifecycleReasonCircuitOpen is the shared display reason for an open session circuit breaker.
 	LifecycleReasonCircuitOpen = "circuit-open"
+	// LifecycleReasonBusyHold is the display reason for a heartbeat-only
+	// busy-hold: a future held_until with an EMPTY sleep_intent, written by
+	// `gc runtime heartbeat` to defer a live session's idle/max-age timers
+	// during a long, silent operation. It is not a user hold — `gc session
+	// suspend` pairs its hold with sleep_intent="user-hold" and keeps the
+	// user-hold display reason. The discriminator mirrors the #3994
+	// crash-recovery arm in cmd/gc/session_reconciler.go. Added for the
+	// 2026-08-13 refinery user-hold display lie.
+	LifecycleReasonBusyHold = "busy-hold"
 	// LifecycleReasonRuntimeMissing is the display reason for a session the
 	// reconciler put asleep because its runtime/process vanished. It is the
 	// durable sleep_reason written by session reconciliation.
@@ -398,6 +412,18 @@ func lifecycleDisplayReasonFromView(view LifecycleView, metadata map[string]stri
 		return string(SleepReasonWaitHold)
 	}
 	if view.HasBlocker(BlockerHeld) {
+		// 2026-08-13 refinery user-hold display lie: held_until has two
+		// writers with different intents — `gc session suspend` (a real user
+		// hold, sleep_intent="user-hold") and `gc runtime heartbeat` (an
+		// agent's busy signal, no sleep_intent). Reporting user-hold for both
+		// made a refinery mid-gate running its heartbeat loop
+		// indistinguishable from a user-suspended session. Only the suspend
+		// form displays user-hold; a heartbeat busy-hold reports busy-hold.
+		// The empty-sleep_intent discriminator mirrors the #3994
+		// crash-recovery arm in cmd/gc/session_reconciler.go.
+		if strings.TrimSpace(metadata["sleep_intent"]) == "" {
+			return LifecycleReasonBusyHold
+		}
 		return string(SleepReasonUserHold)
 	}
 	return ""
@@ -437,6 +463,11 @@ func lifecycleDisplayReasonFromViewInfo(view LifecycleView, info Info) string {
 		return string(SleepReasonWaitHold)
 	}
 	if view.HasBlocker(BlockerHeld) {
+		// Info twin of the busy-hold discriminator above: empty SleepIntent
+		// is a `gc runtime heartbeat` busy-hold, not a user hold.
+		if strings.TrimSpace(info.SleepIntent) == "" {
+			return LifecycleReasonBusyHold
+		}
 		return string(SleepReasonUserHold)
 	}
 	return ""

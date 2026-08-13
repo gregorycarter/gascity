@@ -9707,6 +9707,88 @@ func TestReconcileSessionBeads_HeartbeatHeldDeadSessionRespawns(t *testing.T) {
 	})
 }
 
+// TestReconcileSessionBeads_AsleepHeartbeatBusyHoldWakesForWork guards the
+// wake-suppression twin of the 2026-08-13 refinery user-hold display lie. A
+// session that went to sleep while a stale heartbeat hold was still in the
+// future (the gate ended; up to 45 minutes of held_until remain) could not be
+// woken by incoming work: ComputeAwakeSet's hold suppression treated the
+// heartbeat-only busy-hold like a suspend hold. With the sleep_intent
+// discriminator (mirroring the #3994 arm above), a heartbeat hold no longer
+// suppresses waking a non-live session with assigned work, while a suspend
+// hold (sleep_intent="user-hold") keeps suppressing.
+func TestReconcileSessionBeads_AsleepHeartbeatBusyHoldWakesForWork(t *testing.T) {
+	// buildAsleepHeldSessionWithWork creates a desired "worker" that is asleep
+	// (createSessionBead's default state, runtime not started) while holding a
+	// future held_until plus an in_progress work bead assigned to it.
+	// sleepIntent selects heartbeat ("") vs suspend ("user-hold").
+	buildAsleepHeldSessionWithWork := func(sleepIntent string) (*reconcilerTestEnv, beads.Bead, []beads.Bead) {
+		env := newReconcilerTestEnv()
+		env.cfg = &config.City{Agents: []config.Agent{{Name: "worker"}}}
+		env.addDesired("worker", "worker", false) // asleep: the runtime is not running
+		session := env.createSessionBead("worker", "worker")
+		meta := map[string]string{
+			"held_until": env.clk.Now().Add(45 * time.Minute).UTC().Format(time.RFC3339),
+			// Woke well before this tick, so the session is past the rapid-crash
+			// (30s) and churn-productivity (5m) windows and reaches the wake loop
+			// as a plain asleep-but-desired session rather than a crash-loop
+			// capture — same guard as the #3994 fixture above.
+			"last_woke_at": env.clk.Now().Add(-30 * time.Minute).UTC().Format(time.RFC3339),
+		}
+		if sleepIntent != "" {
+			meta["sleep_intent"] = sleepIntent
+		}
+		env.setSessionMetadata(&session, meta)
+
+		task, err := env.store.Create(beads.Bead{Title: "assigned task", Type: "task"})
+		if err != nil {
+			t.Fatalf("Create(task): %v", err)
+		}
+		status := "in_progress"
+		assignee := session.ID
+		if err := env.store.Update(task.ID, beads.UpdateOpts{Status: &status, Assignee: &assignee}); err != nil {
+			t.Fatalf("Update(task): %v", err)
+		}
+		task, err = env.store.Get(task.ID)
+		if err != nil {
+			t.Fatalf("Get(task): %v", err)
+		}
+		return env, session, []beads.Bead{task}
+	}
+
+	runTick := func(env *reconcilerTestEnv, session beads.Bead, work []beads.Bead) int {
+		got, err := env.store.Get(session.ID)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", session.ID, err)
+		}
+		return reconcileSessionBeads(
+			context.Background(), []beads.Bead{got}, env.desiredState,
+			configuredSessionNames(env.cfg, "", env.store), env.cfg, env.sp, env.store,
+			nil, work, nil, env.dt, map[string]int{"worker": 1}, false, nil, "",
+			nil, env.clk, env.rec, 0, 0, &env.stdout, &env.stderr, env.startOptions...,
+		)
+	}
+
+	t.Run("stale heartbeat hold does not suppress wake for incoming work", func(t *testing.T) {
+		env, session, work := buildAsleepHeldSessionWithWork("")
+		if woken := runTick(env, session, work); woken != 1 {
+			t.Fatalf("woken = %d, want 1 (asleep session with a stale heartbeat hold must wake for assigned work); stderr=%s", woken, env.stderr.String())
+		}
+		if !env.sp.IsRunning("worker") {
+			t.Fatal("asleep heartbeat-held worker with assigned work must be woken within the hold window")
+		}
+	})
+
+	t.Run("suspend hold keeps asleep session down", func(t *testing.T) {
+		env, session, work := buildAsleepHeldSessionWithWork("user-hold")
+		if woken := runTick(env, session, work); woken != 0 {
+			t.Fatalf("woken = %d, want 0 (a suspend hold must keep suppressing wake); stderr=%s", woken, env.stderr.String())
+		}
+		if env.sp.IsRunning("worker") {
+			t.Error("a suspended (sleep_intent=user-hold) asleep session must stay down, not wake for work")
+		}
+	})
+}
+
 func TestReconcileSessionBeads_IdleTimeoutRespectsQuarantineBlocker(t *testing.T) {
 	env := newReconcilerTestEnv()
 	env.cfg = &config.City{Agents: []config.Agent{{Name: "worker"}}}
