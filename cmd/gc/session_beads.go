@@ -2026,7 +2026,7 @@ func syncSessionBeadsWithSnapshotAndRigStores(
 		if b.Metadata["wake_mode"] != tp.WakeMode {
 			queueMeta("wake_mode", tp.WakeMode)
 		}
-		if !tp.ManualSession {
+		if isConfiguredNamed && !tp.ManualSession {
 			if transport := templateParamsRuntimeTransport(tp); b.Metadata["transport"] != transport {
 				queueMeta("transport", transport)
 			}
