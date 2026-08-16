@@ -1963,13 +1963,39 @@ const (
 //
 // All side effects are injected so the decision logic is unit-testable without
 // a live tmux server.
-func submitEnterAndConfirm(sendSubmit func() error, wake func(), busy func() (bool, error), sleep func(time.Duration)) (bool, error) {
+func submitEnterAndConfirm(sendSubmit func() error, wake func(), busy func() (bool, error), draftPending func() (bool, error), sleep func(time.Duration)) (bool, error) {
+	// Only trust "the draft cleared" as evidence of submission when a draft was
+	// actually observed before Enter. Otherwise an already-empty prompt (the
+	// paste never landed) would masquerade as a confirmed submit.
+	draftObserved := false
+	if draftPending != nil {
+		if pending, err := draftPending(); err == nil && pending {
+			draftObserved = true
+		}
+	}
+	// A submitted turn is confirmed by EITHER the busy indicator appearing or
+	// the draft clearing from the prompt. The spinner alone is not sufficient:
+	// a fast turn can start and finish between two polls, which reported a
+	// clean submit as unconfirmed and made a genuinely lost Enter
+	// indistinguishable from a successful one (ggc-dpb39).
+	confirmed := func() bool {
+		if isBusy, err := busy(); err == nil && isBusy {
+			return true
+		}
+		if draftObserved && draftPending != nil {
+			if pending, err := draftPending(); err == nil && !pending {
+				return true
+			}
+		}
+		return false
+	}
 	var lastErr error
 	for send := 0; send < submitEnterMaxSends; send++ {
 		if send > 0 {
-			// Re-confirm the pane is still idle before re-sending. A turn that
-			// already submitted (busy) must never receive a second Enter.
-			if isBusy, err := busy(); err == nil && isBusy {
+			// Re-confirm the pane has not already accepted the draft before
+			// re-sending. A turn that already submitted must never receive a
+			// second Enter.
+			if confirmed() {
 				return true, nil
 			}
 			sleep(submitReEnterBackoff)
@@ -1981,7 +2007,7 @@ func submitEnterAndConfirm(sendSubmit func() error, wake func(), busy func() (bo
 		lastErr = nil // a later send succeeded; don't surface an earlier transient failure
 		wake()
 		for poll := 0; poll < submitConfirmPollsPerSend; poll++ {
-			if isBusy, err := busy(); err == nil && isBusy {
+			if confirmed() {
 				return true, nil
 			}
 			sleep(submitConfirmPollInterval)
@@ -1998,6 +2024,22 @@ func (t *Tmux) paneBusy(target string) (bool, error) {
 		return false, err
 	}
 	return paneContainsBusyIndicator(lines), nil
+}
+
+// paneDraftPending reports whether the target's prompt line still holds
+// unsubmitted text. Used as a second, durable confirmation signal alongside
+// paneBusy — see promptLineHasDraft for why the busy spinner alone is not
+// sufficient.
+func (t *Tmux) paneDraftPending(target string) (bool, error) {
+	lines, err := t.CapturePaneLines(target, promptObservationLines)
+	if err != nil {
+		return false, err
+	}
+	promptPrefix := DefaultReadyPromptPrefix
+	if configured, err := t.GetEnvironment(target, sessionReadyPromptEnvKey); err == nil {
+		promptPrefix = idlePromptPrefix(configured)
+	}
+	return promptLineHasDraft(lines, promptPrefix), nil
 }
 
 // submitVerifyEligible reports whether the target runs a provider whose busy
@@ -2141,7 +2183,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	sendSubmit := func() error { return t.sendNudgeSubmitSequence(target, submitKeys) }
 	wake := func() { t.WakePaneIfDetached(session) }
 	if t.submitVerifyEligible(target) {
-		confirmed, err := submitEnterAndConfirm(sendSubmit, wake, func() (bool, error) { return t.paneBusy(target) }, time.Sleep)
+		confirmed, err := submitEnterAndConfirm(sendSubmit, wake, func() (bool, error) { return t.paneBusy(target) }, func() (bool, error) { return t.paneDraftPending(target) }, time.Sleep)
 		if err != nil {
 			return fmt.Errorf("failed to send submit sequence: %w", err)
 		}
@@ -3598,6 +3640,41 @@ func paneContainsBusyIndicator(lines []string) bool {
 			strings.Contains(line, "[current working directory ") ||
 			claudeBusySpinnerRe.MatchString(line) {
 			return true
+		}
+	}
+	return false
+}
+
+// promptLineHasDraft reports whether the newest prompt line still carries
+// unsubmitted text after the prompt glyph — i.e. a message was pasted but the
+// Enter never landed.
+//
+// This exists because the busy indicator is not a sufficient submit
+// confirmation on its own (ggc-dpb39). paneContainsBusyIndicator samples a
+// transient spinner, so a turn that starts and finishes between two polls looks
+// exactly like a turn that never started. That produced both false alarms
+// (clean submits reported as unconfirmed) and, worse, gave no way to tell a
+// genuinely lost Enter from a fast one — agents sat idle for up to an hour with
+// the instruction visible but unsent, while the sender saw only a warning it
+// had learned to ignore.
+//
+// The prompt line is durable evidence: a submitted turn clears it, a lost Enter
+// leaves the draft sitting there for as long as the agent stays idle.
+func promptLineHasDraft(lines []string, readyPromptPrefix string) bool {
+	normalizedPrefix := strings.ReplaceAll(idlePromptPrefix(readyPromptPrefix), "\u00a0", " ")
+	prefix := strings.TrimSpace(normalizedPrefix)
+	if prefix == "" {
+		return false
+	}
+	// Scan newest-first: the live input line is the last prompt in the capture.
+	// Earlier prompts are transcript history and may legitimately carry text.
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(strings.ReplaceAll(lines[i], "\u00a0", " "))
+		for _, cand := range []string{trimmed, stripLeadingBoxBorder(trimmed)} {
+			if !strings.HasPrefix(cand, prefix) {
+				continue
+			}
+			return strings.TrimSpace(strings.TrimPrefix(cand, prefix)) != ""
 		}
 	}
 	return false

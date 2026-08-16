@@ -19,7 +19,7 @@ func TestSubmitEnterAndConfirmReEntersWhileIdle(t *testing.T) {
 	busy := func() (bool, error) { return enters >= 2, nil }
 	sendEnter := func() error { enters++; return nil }
 
-	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, noSleep)
+	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, nil, noSleep)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -38,7 +38,7 @@ func TestSubmitEnterAndConfirmStopsWhenBusy(t *testing.T) {
 	busy := func() (bool, error) { return enters >= 1, nil }
 	sendEnter := func() error { enters++; return nil }
 
-	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, noSleep)
+	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, nil, noSleep)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -63,7 +63,7 @@ func TestSubmitEnterAndConfirmNoDoubleSubmitOnFastTurn(t *testing.T) {
 	}
 	sendEnter := func() error { enters++; return nil }
 
-	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, noSleep)
+	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, nil, noSleep)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -83,7 +83,7 @@ func TestSubmitEnterAndConfirmBestEffortWhenNeverBusy(t *testing.T) {
 	busy := func() (bool, error) { return false, nil }
 	sendEnter := func() error { enters++; return nil }
 
-	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, noSleep)
+	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, nil, noSleep)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -110,7 +110,7 @@ func TestSubmitEnterAndConfirmClearsStaleSendError(t *testing.T) {
 	}
 	busy := func() (bool, error) { return false, nil }
 
-	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, noSleep)
+	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, nil, noSleep)
 	if err != nil {
 		t.Fatalf("err = %v, want nil (later send succeeded)", err)
 	}
@@ -130,7 +130,7 @@ func TestSubmitEnterAndConfirmReturnsSendError(t *testing.T) {
 	sendEnter := func() error { enters++; return sendErr }
 	busy := func() (bool, error) { return false, nil }
 
-	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, noSleep)
+	confirmed, err := submitEnterAndConfirm(sendEnter, func() {}, busy, nil, noSleep)
 	if confirmed {
 		t.Fatal("confirmed = true, want false")
 	}
