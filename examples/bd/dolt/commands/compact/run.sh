@@ -1099,6 +1099,19 @@ preflight_counts() {
 verify_counts() {
   db="$1"
   preflight="$2"
+  # Database the row/hash probes read from. Callers pass "<db>/<flatten_head>"
+  # so verification is pinned to the flatten's OWN commit rather than to live
+  # HEAD (ga-kh5). Probing live re-reads whatever a concurrent writer has since
+  # committed, which is indistinguishable from the flatten having corrupted
+  # data — and the step-4a downgrade below only forgives the INSERT signature,
+  # never the same-row-count hash drift a concurrent UPDATE produces. On a
+  # write-heavy db that is the normal case, so hq and bt quarantined
+  # permanently (seen_count 39 and 51) and their DOLT_GC starved.
+  # Pinned, the comparison is deterministic: the flatten either preserved
+  # values at its own commit or it did not.
+  # Defaults to the bare db so any caller that has not been updated is
+  # unaffected.
+  verify_db="${3:-$1}"
   fail=0
   verify_counts_saw_gain=0
   verify_counts_saw_gain_hash_drift=0
@@ -1119,7 +1132,7 @@ verify_counts() {
     rest=${line#* }
     expected=${rest%% *}
     expected_hash=${rest#* }
-    if ! actual=$(row_count "$db" "$t"); then
+    if ! actual=$(row_count "$verify_db" "$t"); then
       printf 'compact: db=%s post-flatten row count failed for table=%s\n' "$db" "$t" >&2
       verify_counts_saw_probe_failure=1
       if [ "$fail" -eq 0 ]; then
@@ -1141,7 +1154,7 @@ verify_counts() {
         continue
         ;;
     esac
-    if ! actual_hash=$(table_value_hash "$db" "$t"); then
+    if ! actual_hash=$(table_value_hash "$verify_db" "$t"); then
       printf 'compact: db=%s post-flatten table value hash failed for table=%s\n' "$db" "$t" >&2
       verify_counts_saw_probe_failure=1
       if [ "$fail" -eq 0 ]; then
@@ -2542,7 +2555,11 @@ flatten_database() {
   fi
 
   verify_counts_rc=0
-  verify_counts "$db" "$preflight_tmp" || verify_counts_rc=$?
+  # Verify against the flatten's own commit, not live HEAD (ga-kh5). Reading
+  # "$db/$flatten_head" makes the row/hash comparison immune to writers that
+  # commit during the verify window; without it a single concurrent UPDATE
+  # (same row count, different hash) quarantines the database permanently.
+  verify_counts "$db" "$preflight_tmp" "$db/$flatten_head" || verify_counts_rc=$?
 
   # Writer-race gate (local-verify HEAD-stability). A normal MVCC writer (the
   # beads/mail workload) can commit to this db inside the flatten window, which
@@ -3118,5 +3135,14 @@ main() {
   fi
   exit 0
 }
+
+# Sourcing guard. Unit tests source this file to exercise individual helpers
+# (verify_counts and friends) with stubbed probes, the same way
+# test/dolt/compact_gain_drift_proof_test.sh exercises the extracted
+# gain-drift lib. Unset — the only case that matters in production — this is
+# a no-op and main still runs.
+if [ "${COMPACT_LIB_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 main "$@"
