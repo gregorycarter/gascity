@@ -218,6 +218,35 @@ func TestApplyGraphRouting_LegacySkipsWorkflowKinds(t *testing.T) {
 	}
 }
 
+func TestApplyGraphRouting_UnresolvableAgentFails(t *testing.T) {
+	// The order-dispatch path passes a=nil and resolves the agent from
+	// routedTo. An unresolvable target must fail loudly instead of silently
+	// returning without routing decoration, which left the poured graph
+	// unreachable (ga-2en).
+	newRecipe := func() *formula.Recipe {
+		return &formula.Recipe{
+			Name: "wf-test",
+			Steps: []formula.RecipeStep{
+				{ID: "wf-test", IsRoot: true, Metadata: map[string]string{
+					"gc.kind": "workflow", "gc.formula_contract": "graph.v2",
+				}},
+				{ID: "wf-test.work", Metadata: map[string]string{}},
+			},
+		}
+	}
+	cfg := &config.City{Agents: []config.Agent{{Name: "worker"}}}
+
+	for _, routedTo := range []string{"ghost", "api/ghost"} {
+		err := ApplyGraphRouting(newRecipe(), nil, routedTo, nil, "", "", "", "", nil, "test-city", cfg, Deps{Resolver: noMatchAgentResolver{}})
+		if err == nil {
+			t.Fatalf("ApplyGraphRouting(routedTo=%q) = nil, want unresolvable-target error", routedTo)
+		}
+		if !strings.Contains(err.Error(), routedTo) {
+			t.Fatalf("ApplyGraphRouting(routedTo=%q) error = %q, want it to name the target", routedTo, err)
+		}
+	}
+}
+
 type testAgentResolver struct{}
 
 func (testAgentResolver) ResolveAgent(cfg *config.City, name, _ string) (config.Agent, bool) {

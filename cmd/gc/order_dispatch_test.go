@@ -6784,6 +6784,137 @@ func TestQualifyPool(t *testing.T) {
 	}
 }
 
+func TestQualifyOrderPoolTargetValidation(t *testing.T) {
+	cfg := &config.City{Agents: []config.Agent{
+		{Name: "dog"},
+		{Name: "cat", Suspended: true},
+		{Name: "worker", Dir: "api"},
+		{Name: "sleeper", Dir: "api", Suspended: true},
+	}}
+	emptyFleetCfg := &config.City{}
+
+	tests := []struct {
+		name    string
+		cfg     *config.City
+		order   orders.Order
+		want    string
+		wantErr string
+	}{
+		// Resolved targets naming a configured, active agent keep working.
+		{"active city pool", cfg, orders.Order{Pool: "dog"}, "dog", ""},
+		{"active rig pool", cfg, orders.Order{Rig: "api", Pool: "worker"}, "api/worker", ""},
+		{"active pre-qualified pool", cfg, orders.Order{Pool: "api/worker"}, "api/worker", ""},
+
+		// Suspended targets fail the pour instead of routing work to a pool
+		// that will never claim it (ga-2en).
+		{"suspended city pool", cfg, orders.Order{Pool: "cat"}, "", `pool "cat" resolved to suspended agent "cat"`},
+		{"suspended rig pool", cfg, orders.Order{Rig: "api", Pool: "sleeper"}, "", `pool "sleeper" resolved to suspended agent "api/sleeper"`},
+		{"suspended pre-qualified pool", cfg, orders.Order{Pool: "api/sleeper"}, "", `pool "api/sleeper" resolved to suspended agent "api/sleeper"`},
+
+		// Targets naming nothing configured fail the pour instead of
+		// stamping a gc.routed_to no pool can ever claim (ga-2en).
+		{"unknown city pool", cfg, orders.Order{Pool: "ghost"}, "", `pool "ghost" resolved to "ghost", which matches no configured agent`},
+		{"unknown rig pool", cfg, orders.Order{Rig: "api", Pool: "ghost"}, "", `pool "ghost" resolved to "api/ghost", which matches no configured agent`},
+
+		// Without a configured fleet there is nothing to validate against;
+		// keep the legacy passthrough.
+		{"empty fleet passthrough", emptyFleetCfg, orders.Order{Pool: "ghost"}, "ghost", ""},
+		{"nil cfg passthrough", nil, orders.Order{Rig: "api", Pool: "ghost"}, "api/ghost", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := qualifyOrderPool(tt.order, tt.cfg)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("qualifyOrderPool(%+v) error = nil, want %q", tt.order, tt.wantErr)
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("qualifyOrderPool(%+v) error = %q, want %q", tt.order, err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("qualifyOrderPool(%+v) error = %v", tt.order, err)
+			}
+			if got != tt.want {
+				t.Errorf("qualifyOrderPool(%+v) = %q, want %q", tt.order, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOrderDispatchRejectsUnclaimablePool(t *testing.T) {
+	tests := []struct {
+		name       string
+		agents     []config.Agent
+		pool       string
+		wantStderr string
+	}{
+		{
+			name:       "suspended pool agent",
+			agents:     []config.Agent{{Name: "dog", Suspended: true}},
+			pool:       "dog",
+			wantStderr: `pool "dog" resolved to suspended agent "dog"`,
+		},
+		{
+			name:       "pool matches no configured agent",
+			agents:     []config.Agent{{Name: "cat"}},
+			pool:       "dog",
+			wantStderr: `pool "dog" resolved to "dog", which matches no configured agent`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := beads.NewMemStore()
+			var rec memRecorder
+			var stderr bytes.Buffer
+
+			aa := []orders.Order{{
+				Name:         "mol-doctor",
+				Trigger:      "cooldown",
+				Interval:     "5m",
+				Formula:      "test-formula",
+				Pool:         tt.pool,
+				FormulaLayer: sharedTestFormulaDir,
+			}}
+
+			m := &memoryOrderDispatcher{
+				aa: aa,
+				storeFn: func(_ execStoreTarget) (beads.Store, error) {
+					return store, nil
+				},
+				execRun: shellExecRunner,
+				rec:     &rec,
+				stderr:  &stderr,
+				cfg:     &config.City{Agents: tt.agents},
+			}
+
+			m.dispatch(context.Background(), t.TempDir(), time.Now())
+			m.drain(context.Background())
+
+			if !rec.hasType(events.OrderFailed) {
+				t.Fatal("missing order.failed event for unclaimable pool")
+			}
+			if !strings.Contains(stderr.String(), tt.wantStderr) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tt.wantStderr)
+			}
+			all := trackingBeads(t, store, "order-run:mol-doctor")
+			var workCount int
+			for _, bead := range all {
+				if !strings.HasPrefix(bead.Title, "order:") {
+					workCount++
+				}
+			}
+			if len(all) != 1 {
+				t.Fatalf("tracking beads with order-run label = %d, want 1", len(all))
+			}
+			if workCount != 0 {
+				t.Fatalf("work bead count = %d, want 0 (no unreachable wisp)", workCount)
+			}
+		})
+	}
+}
+
 // --- city pack layer tests ---
 
 func TestBuildOrderDispatcherUsesProviderAwareFileStore(t *testing.T) {

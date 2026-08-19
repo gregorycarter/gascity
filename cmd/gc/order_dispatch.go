@@ -3269,7 +3269,35 @@ func rigExclusiveLayers(rigLayers, cityLayers []string) []string {
 // city remain stable. Dotted values that do not match a configured bound
 // target are preserved for backward compatibility.
 func qualifyOrderPool(a orders.Order, cfg *config.City) (string, error) {
-	return qualifyPool(a.Pool, a.Rig, cfg, orderPoolSourceDirHint(a))
+	pool, err := qualifyPool(a.Pool, a.Rig, cfg, orderPoolSourceDirHint(a))
+	if err != nil {
+		return "", err
+	}
+	if err := validateOrderPoolTarget(a.Pool, pool, cfg); err != nil {
+		return "", err
+	}
+	return pool, nil
+}
+
+// validateOrderPoolTarget rejects a resolved pool target no configured agent
+// can ever claim — one naming nothing in cfg.Agents, or one whose agent is
+// suspended — so the pour fails loudly instead of stamping a gc.routed_to
+// that strands the bead (ga-2en). config.FindAgent returns the base template
+// for the target, whose Suspended flag pool instances inherit. Without a
+// configured fleet (nil cfg or no agents) there is nothing to validate
+// against, so the legacy passthrough is preserved.
+func validateOrderPoolTarget(raw, resolved string, cfg *config.City) error {
+	if cfg == nil || len(cfg.Agents) == 0 {
+		return nil
+	}
+	agent := config.FindAgent(cfg, resolved)
+	if agent == nil {
+		return fmt.Errorf("pool %q resolved to %q, which matches no configured agent", raw, resolved)
+	}
+	if agent.Suspended {
+		return fmt.Errorf("pool %q resolved to suspended agent %q", raw, resolved)
+	}
+	return nil
 }
 
 func orderPoolSourceDirHint(a orders.Order) string {

@@ -642,7 +642,7 @@ func ApplyGraphRouting(recipe *formula.Recipe, a *config.Agent, routedTo string,
 		}
 		resolved, ok := deps.Resolver.ResolveAgent(cfg, baseName, rigContext)
 		if !ok {
-			return nil
+			return fmt.Errorf("unknown formulas v2 target %q", routedTo)
 		}
 		a = &resolved
 	}
