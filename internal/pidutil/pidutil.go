@@ -132,6 +132,15 @@ func AliveWithCmdline(pid int, match func([]string) bool) bool {
 		return false
 	}
 	argv, err := Cmdline(pid)
+	return argvMatches(argv, err, match)
+}
+
+// argvMatches reports whether a Cmdline result satisfies match. An argv that
+// could not be read is never a match: callers use AliveWithCmdline to decide
+// whether the PID in a pidfile is still THEIR process, so answering "yes" when
+// the answer is unknown makes them skip work they must do. "Not my process" is
+// the recoverable direction, so an unreadable read fails closed.
+func argvMatches(argv []string, err error, match func([]string) bool) bool {
 	if err != nil {
 		return false
 	}

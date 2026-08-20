@@ -1,6 +1,7 @@
 package pidutil
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,24 +121,51 @@ func TestAliveWithCmdline_NilMatchIsFalse(t *testing.T) {
 	}
 }
 
-// TestCmdline_FailsClosedWhenUnreadable covers the direction that matters for
-// safety here. An unreadable process must NOT be reported as matching: the
+// TestArgvMatches_FailsClosedWhenUnreadable covers the direction that matters
+// for safety here. An unreadable process must NOT be reported as matching: the
 // caller then assumes no poller is running and starts one. A duplicate poller is
 // recoverable; a silently absent one is not.
-func TestCmdline_FailsClosedWhenUnreadable(t *testing.T) {
-	if runtime.GOOS == "linux" {
-		t.Skip("on linux /proc answers directly, so the ps stub cannot make argv unreadable")
+//
+// It drives argvMatches directly because no host reliably offers a live PID
+// whose argv cannot be read: on linux /proc/<pid>/cmdline is world-readable, and
+// on darwin kern.procargs2 refuses only processes owned by another user, so a
+// suite running as root has no victim at all. The earlier spelling stubbed ps
+// on PATH to blind the argv reader; that stopped blinding anything once darwin
+// moved onto kern.procargs2, and the test then asserted against a process whose
+// argv was perfectly readable. Driving the rule directly gives it teeth on
+// every platform, including linux CI, where this case has never run.
+func TestArgvMatches_FailsClosedWhenUnreadable(t *testing.T) {
+	unreadable := errors.New("pidutil: reading argv for PID 4321: permission denied")
+
+	if argvMatches(nil, unreadable, func([]string) bool { return true }) {
+		t.Fatal("argvMatches = true with no readable argv; must fail closed so the caller starts its poller")
+	}
+	if argvMatches([]string{"gc", "nudge"}, unreadable, func([]string) bool { return true }) {
+		t.Fatal("argvMatches = true for an errored read that also returned argv")
+	}
+	if !argvMatches([]string{"gc", "nudge"}, nil, func(argv []string) bool {
+		return ArgvContainsSequence(argv, "gc", "nudge")
+	}) {
+		t.Fatal("argvMatches = false for a readable, matching argv")
+	}
+}
+
+// TestAliveWithCmdline_FailsClosedOnUnreadableProcess proves AliveWithCmdline
+// routes Cmdline's error into that rule instead of discarding it. It needs a
+// live process whose argv this user cannot read, which exists only when the
+// host supplies one, so it skips where the platform cannot.
+func TestAliveWithCmdline_FailsClosedOnUnreadableProcess(t *testing.T) {
+	const initPID = 1
+
+	if !Alive(initPID) {
+		t.Skipf("PID %d is not alive on %s", initPID, runtime.GOOS)
+	}
+	if argv, err := Cmdline(initPID); err == nil {
+		t.Skipf("Cmdline(%d) = %q with no error on %s; this host exposes no live process with unreadable argv", initPID, argv, runtime.GOOS)
 	}
 
-	binDir := t.TempDir()
-	// A ps that produces nothing, so the non-/proc path has no argv to offer.
-	if err := os.WriteFile(filepath.Join(binDir, "ps"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile(ps): %v", err)
-	}
-	t.Setenv("PATH", strings.Join([]string{binDir, os.Getenv("PATH")}, string(os.PathListSeparator)))
-
-	if AliveWithCmdline(os.Getpid(), func([]string) bool { return true }) {
-		t.Fatal("AliveWithCmdline = true with no readable argv; must fail closed so the caller starts its poller")
+	if AliveWithCmdline(initPID, func([]string) bool { return true }) {
+		t.Fatalf("AliveWithCmdline(%d) = true with no readable argv; must fail closed so the caller starts its poller", initPID)
 	}
 }
 

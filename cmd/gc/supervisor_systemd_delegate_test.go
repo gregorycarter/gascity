@@ -70,8 +70,18 @@ func installFakeDelegatedSystemctlHangingVerbWithUnitState(t *testing.T, verb st
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "systemctl-args")
 	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\ncase \" $* \" in *\" is-active \"*) exit %d ;; *\" %s \"*) exec sleep 5 ;; esac\nexit 0\n", argsFile, isActiveExit, verb)
-	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0o755); err != nil {
+	shim := filepath.Join(dir, "systemctl")
+	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
 		t.Fatalf("writing fake systemctl: %v", err)
+	}
+	// macOS runs a one-time syspolicy check on the first exec of a newly
+	// written executable. Warm the shim before timeout-sensitive assertions;
+	// discard the warm-up record so the log contains only calls under test.
+	if err := exec.Command(shim, "warmup").Run(); err != nil {
+		t.Fatalf("warming fake systemctl: %v", err)
+	}
+	if err := os.Remove(argsFile); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("clearing fake systemctl arg log: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return argsFile

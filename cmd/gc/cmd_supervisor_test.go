@@ -4694,6 +4694,11 @@ func TestStopManagedCityDoesNotUseStartupOrDriftTimeouts(t *testing.T) {
 		},
 	}
 
+	// macOS runs a one-time syspolicy check on the first exec of a newly
+	// written executable. Pay that cost before the timed window so this test
+	// measures the stop path's configured waits rather than OS policy overhead.
+	_ = exec.Command(script, "health").Run()
+
 	var stderr bytes.Buffer
 	start := time.Now()
 	err := stopManagedCity(mc, cityPath, &stderr)
