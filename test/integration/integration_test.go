@@ -493,6 +493,13 @@ func sweepSubprocessTestProcesses() {
 }
 
 func configureIntegrationSupervisorCommand(cmd *exec.Cmd) {
+	// Keep a runner-level signal from reaching every isolated supervisor in
+	// the integration process group. Cleanup still targets this process
+	// directly through cmd.Cancel and the supervisor stop command.
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return os.ErrProcessDone
@@ -2032,6 +2039,9 @@ func TestConfigureIntegrationSupervisorCommandUsesGracefulCancel(t *testing.T) {
 	}
 	if cmd.WaitDelay != 10*time.Second {
 		t.Fatalf("supervisor command WaitDelay = %s, want 10s", cmd.WaitDelay)
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Fatalf("supervisor command SysProcAttr = %#v, want an isolated process group", cmd.SysProcAttr)
 	}
 }
 
