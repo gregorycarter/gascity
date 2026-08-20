@@ -527,6 +527,25 @@ Cities that had skipped the old formula orders (`mol-dog-jsonl`,
 `mol-dog-reaper`) stay opted out; the renamed orders honor the legacy
 skip entries.
 
+### Migrating retired maintenance formulas
+
+Maintenance formulas that were already materialized before this change are
+not restarted. The active orders run the backup, export, health, and cleanup
+work inline, while the daemon keeps the maintenance schedule. Remove any
+retired formula names from agent startup prompts and scheduled work, then
+restart the city so it loads the current order configuration. Keep the legacy
+skip names only when you intentionally want the corresponding replacement
+order disabled.
+
+The cleanup order also repairs old formula-step residue. On each run it closes
+stale non-message steps when their local parent is closed or no longer exists,
+then the normal retention pass removes aged closed data. Live parents and
+cross-store dependencies are preserved. To verify a migration, check the
+reaper summary for the closed-step count and confirm that later runs do not
+report new retired-formula steps. If a step belongs to a live or cross-store
+workflow, leave it in place and resolve that workflow instead of deleting it
+manually.
+
 ### Local-only vs push mode
 
 The archive operates in one of two modes, detected from the state of its

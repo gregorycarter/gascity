@@ -4641,6 +4641,26 @@ func TestBackupOrderTimeoutCoversScriptBudget(t *testing.T) {
 	}
 }
 
+func TestDoltMaintenanceOrdersDoNotPourFormulaWisps(t *testing.T) {
+	root := repoRoot(t)
+	for _, name := range []string{"mol-dog-backup", "mol-dog-doctor"} {
+		data, err := os.ReadFile(filepath.Join(root, "orders", name+".toml"))
+		if err != nil {
+			t.Fatalf("read %s order: %v", name, err)
+		}
+		order, err := orders.Parse(data)
+		if err != nil {
+			t.Fatalf("parse %s order: %v", name, err)
+		}
+		if order.Exec == "" {
+			t.Fatalf("%s order has no inline exec path", name)
+		}
+		if order.Formula != "" || order.Pool != "" {
+			t.Fatalf("%s order still pours formula work: formula=%q pool=%q", name, order.Formula, order.Pool)
+		}
+	}
+}
+
 func TestBackupScriptDiscoversNamedBackupsAndSyncsArtifactsOffsite(t *testing.T) {
 	cityPath := t.TempDir()
 	dataDir := filepath.Join(cityPath, "dolt-data")

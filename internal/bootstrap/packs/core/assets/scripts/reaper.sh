@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# reaper — close stale wisps with closed parents/roots, purge old closed data, auto-close stale and TTL-expired issues.
+# reaper — close stale wisps with closed or missing parents/roots, purge old closed data, auto-close stale and TTL-expired issues.
 #
 # Core exec order. All operations are deterministic: SQL queries with age
 # thresholds, gc bd close/update commands, count comparisons against alert
@@ -792,8 +792,13 @@ while IFS= read -r DB; do
     DB_MUTATIONS=0
 
     # Step 1: Count stale non-closed wisps, then close only candidates whose
-    # explicit ownership edge points to a closed parent/root. Wisps
-    # without an ownership edge are reported but not closed by age alone.
+    # explicit ownership edge points to a closed parent/root or to a missing
+    # local parent. Wisps without an ownership edge are reported but not
+    # closed by age alone. A missing local parent is an orphaned formula step:
+    # its molecule was already purged or never materialized, so retaining the
+    # step cannot preserve live work. External targets are deliberately not
+    # treated as missing local parents; their liveness requires cross-store
+    # traversal, which this per-database reaper does not perform.
     get_sql_count "$DB" "stale non-closed wisp" "
         SELECT COUNT(*) FROM \`$DB\`.wisps
         WHERE status IN ('open', 'hooked', 'in_progress')
@@ -823,6 +828,16 @@ while IFS= read -r DB; do
             AND (
                 parent_wisp.status = 'closed'
                 OR parent_issue.status = 'closed'
+                OR (
+                    d.depends_on_wisp_id IS NOT NULL
+                    AND d.depends_on_wisp_id <> ''
+                    AND parent_wisp.id IS NULL
+                )
+                OR (
+                    d.depends_on_issue_id IS NOT NULL
+                    AND d.depends_on_issue_id <> ''
+                    AND parent_issue.id IS NULL
+                )
             )
         "
         CLOSE_WISP_BATCH=$SQL_COUNT_RESULT
@@ -851,6 +866,16 @@ while IFS= read -r DB; do
                     AND (
                         parent_wisp.status = 'closed'
                         OR parent_issue.status = 'closed'
+                        OR (
+                            d.depends_on_wisp_id IS NOT NULL
+                            AND d.depends_on_wisp_id <> ''
+                            AND parent_wisp.id IS NULL
+                        )
+                        OR (
+                            d.depends_on_issue_id IS NOT NULL
+                            AND d.depends_on_issue_id <> ''
+                            AND parent_issue.id IS NULL
+                        )
                     )
                 ) reaper_wisp_candidates
             )

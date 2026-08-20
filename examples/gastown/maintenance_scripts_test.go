@@ -4491,6 +4491,31 @@ exit 0
 	}
 }
 
+func TestReaperClosesStaleWispWithMissingParent(t *testing.T) {
+	doltLog, gcLog := runReaperCloseFixture(t, "missing_parent")
+
+	logData, err := os.ReadFile(doltLog)
+	if err != nil {
+		t.Fatalf("ReadFile(dolt log): %v", err)
+	}
+	log := string(logData)
+	if !strings.Contains(log, "d.depends_on_wisp_id IS NOT NULL") ||
+		!strings.Contains(log, "parent_wisp.id IS NULL") {
+		t.Fatalf("reaper missing-parent close path does not prove the local wisp parent is absent:\n%s", log)
+	}
+	if !strings.Contains(log, "UPDATE `beads`.wisps SET status='closed'") {
+		t.Fatalf("reaper did not close stale formula step whose parent wisp is missing:\n%s", log)
+	}
+
+	gcData, err := os.ReadFile(gcLog)
+	if err != nil {
+		t.Fatalf("ReadFile(gc log): %v", err)
+	}
+	if !strings.Contains(string(gcData), "stale_wisps:1") || !strings.Contains(string(gcData), "closed_wisps:1") {
+		t.Fatalf("reaper summary did not report missing-parent stale wisp close:\n%s", gcData)
+	}
+}
+
 func TestReaperClosesGraphWorkflowWispTrackedToClosedRoot(t *testing.T) {
 	doltLog, gcLog := runReaperCloseFixture(t, "tracks_owned_root")
 
@@ -7087,6 +7112,10 @@ close_fixture_matches() {
     blocks_closed_predecessor)
       printf '%s' "$*" | grep -F "wisp_dependencies d" >/dev/null 2>&1 &&
         printf '%s' "$*" | grep -F "blocks" >/dev/null 2>&1
+      ;;
+    missing_parent)
+      printf '%s' "$*" | grep -F "d.depends_on_wisp_id IS NOT NULL" >/dev/null 2>&1 &&
+        printf '%s' "$*" | grep -F "parent_wisp.id IS NULL" >/dev/null 2>&1
       ;;
     *)
       return 1
