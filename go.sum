@@ -661,6 +661,8 @@ github.com/gregorycarter/beads v1.2.2-0.20260820081939-6c35a31db1ea h1:IMqYi2fQ2
 github.com/gregorycarter/beads v1.2.2-0.20260820081939-6c35a31db1ea/go.mod h1:iMHTYp47/cVnXX+SXweYlG9M9dZhOopTFCBLpyOT69E=
 github.com/gregorycarter/gascity-packs v0.4.1-0.20260820165004-3fd078457d8f h1:zmy3PXTFzil/oG1wSVlO4YFviA+y4Z0IcqBRV2yCCwY=
 github.com/gregorycarter/gascity-packs v0.4.1-0.20260820165004-3fd078457d8f/go.mod h1:OHqPd055b+3Q93mZqxdwTk2/3sz+xxCBUWlggvuRnMk=
+github.com/gregorycarter/gascity-packs v0.4.1-0.20260820174858-4dae829b4c7e h1:RfU6O39y30lMiItai515DlSQAbIlliUMAQrHEcdpKW8=
+github.com/gregorycarter/gascity-packs v0.4.1-0.20260820174858-4dae829b4c7e/go.mod h1:OHqPd055b+3Q93mZqxdwTk2/3sz+xxCBUWlggvuRnMk=
 github.com/grpc-ecosystem/grpc-gateway v1.16.0/go.mod h1:BDjrQk3hbvj6Nolgz8mAMFbcEtjT1g+wF4CSlocrBnw=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 h1:5VipnvEpbqr2gA2VbM+nYVbkIF28c5ZQfqCBQ5g2xfk=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0/go.mod h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=

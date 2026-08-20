@@ -45,9 +45,9 @@ require (
 	pgregory.net/rapid v1.2.0
 )
 
-// Pin the refinery rejection routing fix from the operator's pack fork until
-// the change is released by the canonical gascity-packs module.
-replace github.com/gastownhall/gascity-packs => github.com/gregorycarter/gascity-packs v0.4.1-0.20260820165004-3fd078457d8f
+// Pin the refinery rejection routing and witness wisp reconciliation fixes
+// from the operator's pack fork until they are released canonically.
+replace github.com/gastownhall/gascity-packs => github.com/gregorycarter/gascity-packs v0.4.1-0.20260820174858-4dae829b4c7e
 
 // Pin the schema-v65 Beads fork revision used by the live city. The canonical
 // module has not yet published this revision, so keep the original import path

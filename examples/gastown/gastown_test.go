@@ -2302,10 +2302,9 @@ func TestPolecatStartupUsesHookClaim(t *testing.T) {
 // ephemeral molecules on the town ledger, poured/assigned with `gc bd`. Its
 // startup work-check and no-idle guard must therefore (1) look them up with
 // `gc bd`, not the bare-bd shared query that resolves to the rig ledger and
-// never sees them; (2) filter `--type=molecule`, never the invalid
-// `--type=wisp` (not a valid bd issue type — the query errors and matches
-// nothing); and (3) reconcile duplicates to exactly one by burning the
-// surplus, so restarts never accumulate wisps.
+// never sees them; (2) query the ephemeral tier directly because bd list
+// omits ephemeral rows; and (3) reconcile duplicates to exactly one by
+// burning the surplus, so restarts never accumulate wisps.
 func TestWitnessStartupAndNoIdleReconcileWisps(t *testing.T) {
 	rendered := renderGastownPromptForPack(t,
 		"packs/gastown/agents/witness/prompt.template.md",
@@ -2331,11 +2330,11 @@ func TestWitnessStartupAndNoIdleReconcileWisps(t *testing.T) {
 			t.Errorf("witness startup must not use the bare-bd shared query %q; patrol wisps live on the town ledger via gc bd", bare)
 		}
 	}
-	// Must look up its own wisps on the town ledger with gc bd + --type=molecule,
-	// then reconcile to one by burning surplus.
+	// Must look up its own wisps on the town ledger's ephemeral tier, then
+	// reconcile to one by burning surplus.
 	for _, want := range []string{
-		`gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule`,
-		`gc bd list --assignee="$GC_AGENT" --status=open --type=molecule`,
+		`gc bd query --json 'ephemeral=true AND status=in_progress' --limit=100`,
+		`gc bd query --json 'ephemeral=true AND status=open' --limit=100`,
 		"gc bd mol burn",
 	} {
 		if !strings.Contains(startup, want) {
@@ -2346,8 +2345,8 @@ func TestWitnessStartupAndNoIdleReconcileWisps(t *testing.T) {
 	// No-idle guard: between its heading and "## Context Exhaustion".
 	noIdle := sectionBetween(t, rendered, "## CRITICAL: No Idle State Between Cycles", "## Context Exhaustion")
 	for _, want := range []string{
-		`gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule`,
-		`gc bd list --assignee="$GC_AGENT" --status=open --type=molecule`,
+		`gc bd query --json 'ephemeral=true AND status=in_progress' --limit=100`,
+		`gc bd query --json 'ephemeral=true AND status=open' --limit=100`,
 		"gc bd mol burn",
 	} {
 		if !strings.Contains(noIdle, want) {
@@ -2880,15 +2879,15 @@ func TestGastownPatrolPromptFallbackPreservesLifecycle(t *testing.T) {
 			agentName: "gascity/gastown.witness",
 			template:  "witness",
 			formula:   "mol-witness-patrol",
-			// The witness no-idle guard finds its own patrol wisps with
-			// --type=molecule (never the invalid --type=wisp) and reconciles
-			// surplus open wisps to exactly one by burning extras (ga-7c6).
+			// The witness no-idle guard finds its own patrol wisps through the
+			// ephemeral town-ledger query and reconciles surplus open wisps to
+			// exactly one by burning extras (ga-b0d).
 			wantOrder: []string{
 				`run ` + "`gc hook`" + ` immediately`,
 				`CURRENT_WISP=${GC_BEAD_ID:-}`,
 				`if [ -z "$CURRENT_WISP" ]; then`,
-				`CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --limit=1 --json | jq -r '.[0].id // empty')`,
-				`OPEN_WISPS=$(gc bd list --assignee="$GC_AGENT" --status=open --type=molecule --limit=0 --json | jq -r '.[].id')`,
+				`CURRENT_WISP=$(gc bd query --json 'ephemeral=true AND status=in_progress' --limit=100 | jq -r --arg a "$GC_AGENT" '.[] | select((.assignee // "") == $a) | .id' | sed -n '1p')`,
+				`OPEN_WISPS=$(gc bd query --json 'ephemeral=true AND status=open' --limit=100 | jq -r --arg a "$GC_AGENT" '.[] | select((.assignee // "") == $a) | .id')`,
 				`ASSIGNED_WISP=$(printf '%s\n' $OPEN_WISPS | sed -n '1p')`,
 				`gc bd mol burn "$extra" --force`,
 				`if [ -n "$CURRENT_WISP" ] && [ -z "$ASSIGNED_WISP" ]; then`,
@@ -3454,6 +3453,13 @@ func TestWitnessPatrolAllStepsContinueNotExit(t *testing.T) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading witness patrol formula: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, `gc bd query --json 'ephemeral=true AND status=open' --limit=100`) {
+		t.Fatal("witness patrol next-iteration must query the ephemeral town-ledger tier")
+	}
+	if strings.Contains(body, `gc bd list --assignee="$GC_AGENT" --status=open --type=molecule`) {
+		t.Fatal("witness patrol next-iteration still uses bd list, which omits ephemeral wisps")
 	}
 
 	var parsed struct {
