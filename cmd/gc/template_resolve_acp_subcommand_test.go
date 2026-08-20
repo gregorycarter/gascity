@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,6 +19,25 @@ import (
 // global options of the parent CLI that the subcommand's parser rejects.
 func kimiACPBuildParams(t *testing.T, cityPath string) *agentBuildParams {
 	t.Helper()
+	kimiConfigDir := filepath.Join(cityPath, ".kimi")
+	if err := os.MkdirAll(kimiConfigDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll Kimi config dir: %v", err)
+	}
+	const kimiConfig = `default_model = "kimi-k2.6"
+
+[providers.kimi]
+type = "kimi"
+base_url = "https://api.kimi.example/v1"
+api_key = "test-key"
+
+[models."kimi-k2.6"]
+provider = "kimi"
+model = "kimi-k2.6"
+max_context_size = 128000
+`
+	if err := os.WriteFile(filepath.Join(kimiConfigDir, "config.toml"), []byte(kimiConfig), 0o600); err != nil {
+		t.Fatalf("WriteFile Kimi config: %v", err)
+	}
 	return &agentBuildParams{
 		cityName:   "city",
 		cityPath:   cityPath,
