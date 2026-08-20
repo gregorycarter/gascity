@@ -84,6 +84,9 @@ func unwrapBeadPolicyStore(store beads.Store) (beads.Store, *beadPolicyStore, bo
 }
 
 func (s *beadPolicyStore) Create(b beads.Bead) (beads.Bead, error) {
+	if err := validateRequiredBeadCategory(s.cfg, b); err != nil {
+		return beads.Bead{}, err
+	}
 	_, storage := s.policyForCreate(b)
 	return createWithStoragePolicy(s.createTarget(coordclass.Classify(b)), b, storage)
 }
@@ -253,6 +256,9 @@ func (s *beadPolicyGraphStore) ApplyGraphPlan(ctx context.Context, plan *beads.G
 	if plan == nil {
 		return s.graphApplierFor(coordclass.ClassWork).ApplyGraphPlan(ctx, plan)
 	}
+	if err := validateRequiredBeadCategoryGraph(s.cfg, plan); err != nil {
+		return nil, err
+	}
 	applier := s.graphApplierFor(coordclass.ClassifyGraphPlan(plan))
 	policyName := policyNameForGraphPlan(plan)
 	if policyName == "" {
@@ -263,6 +269,20 @@ func (s *beadPolicyGraphStore) ApplyGraphPlan(ctx context.Context, plan *beads.G
 		return storageApplier.ApplyGraphPlanWithStorage(ctx, plan, beadStorageClass(storage))
 	}
 	return applier.ApplyGraphPlan(ctx, plan)
+}
+
+func validateRequiredBeadCategory(cfg *config.City, b beads.Bead) error {
+	if cfg == nil || coordclass.Classify(b) != coordclass.ClassWork {
+		return nil
+	}
+	return (beads.CreationPolicy{RequiredCategories: cfg.Beads.RequiredCategories}).Validate(b)
+}
+
+func validateRequiredBeadCategoryGraph(cfg *config.City, plan *beads.GraphApplyPlan) error {
+	if cfg == nil {
+		return nil
+	}
+	return (beads.CreationPolicy{RequiredCategories: cfg.Beads.RequiredCategories}).ValidateGraphPlan(plan)
 }
 
 // policyNameForGraphPlan returns the storage-tier policy name for a graph-apply

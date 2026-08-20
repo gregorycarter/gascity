@@ -1406,6 +1406,10 @@ type BeadsConfig struct {
 	// "require" (guarded release or a typed refusal). Empty defaults to "off".
 	// Any other value fails config load.
 	GuardedRelease string `toml:"guarded_release,omitempty" jsonschema:"enum=off,enum=auto,enum=require"`
+	// RequiredCategories makes bead creation require exactly one of these
+	// labels. Labels not in this list remain ordinary orthogonal labels. An
+	// omitted value preserves the legacy unrestricted creation behavior.
+	RequiredCategories []string `toml:"required_categories,omitempty"`
 	// Policies defines per-bead-use storage and garbage-collection defaults.
 	// Policy names are interpreted by higher-level systems; unknown names are
 	// preserved so packs can stage future policy classes without breaking load.
@@ -4619,6 +4623,12 @@ func Parse(data []byte) (*City, error) {
 		return nil, err
 	}
 	if err := validateGuardedRelease(cfg.Beads.GuardedRelease); err != nil {
+		return nil, err
+	}
+	if md.IsDefined("beads", "required_categories") && len(cfg.Beads.RequiredCategories) == 0 {
+		return nil, fmt.Errorf("beads.required_categories must contain at least one category when configured")
+	}
+	if err := ValidateRequiredCategories(cfg.Beads.RequiredCategories); err != nil {
 		return nil, err
 	}
 	// Parse sees one layer. Cross-layer storage invariants (six-class

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/fsys"
@@ -71,6 +72,30 @@ bd_compatibility = "bd-1.0.5"
 	}
 	if cfg.Beads.NormalizedBDCompatibility() != "bd-1.0.5" {
 		t.Fatalf("BDCompatibility = %q, want the fragment's bd-1.0.5", cfg.Beads.NormalizedBDCompatibility())
+	}
+}
+
+func TestLoadWithIncludesPreservesRequiredCategoriesAcrossBeadsFragment(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+include = ["fragment.toml"]
+
+[workspace]
+name = "test"
+
+[beads]
+required_categories = ["product", "infrastructure"]
+`)
+	fs.Files["/city/fragment.toml"] = []byte(`
+[beads]
+bd_compatibility = "bd-1.0.5"
+`)
+	cfg, _, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	if got, want := cfg.Beads.RequiredCategories, []string{"product", "infrastructure"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("RequiredCategories = %v, want %v", got, want)
 	}
 }
 

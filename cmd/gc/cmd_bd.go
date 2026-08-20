@@ -335,6 +335,10 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 		}
 		return 1
 	}
+	if err := validateBdCreationPolicy(bdArgs, cfg); err != nil {
+		fmt.Fprintf(stderr, "gc bd: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 
 	// Pre-flight exact-ID guard for write-mutating subcommands (gcy-g4o).
 	// bd's fuzzy/substring resolver can silently match a longer ID that

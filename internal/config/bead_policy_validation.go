@@ -6,6 +6,27 @@ import (
 	"strings"
 )
 
+// ValidateRequiredCategories validates the category-label creation policy.
+// Empty means the policy is disabled; once configured, every category must be
+// a distinct non-empty label so enforcement cannot silently weaken.
+func ValidateRequiredCategories(categories []string) error {
+	seen := make(map[string]struct{}, len(categories))
+	for _, raw := range categories {
+		category := strings.TrimSpace(raw)
+		if category == "" {
+			return fmt.Errorf("beads.required_categories contains an empty category")
+		}
+		if category != raw {
+			return fmt.Errorf("beads.required_categories category %q has surrounding whitespace", raw)
+		}
+		if _, ok := seen[category]; ok {
+			return fmt.Errorf("beads.required_categories contains duplicate category %q", category)
+		}
+		seen[category] = struct{}{}
+	}
+	return nil
+}
+
 var bd104CompatiblePolicyStorage = map[string][]string{
 	"session":        {BeadStorageNoHistory, BeadStorageHistory},
 	"wait":           {BeadStorageNoHistory, BeadStorageHistory},

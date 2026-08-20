@@ -647,6 +647,7 @@ name = "test-city"
 provider = "file"
 backend = "doltlite"
 event_hooks = false
+required_categories = ["product", "infrastructure"]
 
 [[agent]]
 name = "mayor"
@@ -663,6 +664,9 @@ name = "mayor"
 	}
 	if cfg.Beads.EventHooks == nil || *cfg.Beads.EventHooks {
 		t.Errorf("Beads.EventHooks = %v, want false", cfg.Beads.EventHooks)
+	}
+	if got, want := cfg.Beads.RequiredCategories, []string{"product", "infrastructure"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Beads.RequiredCategories = %v, want %v", got, want)
 	}
 }
 
@@ -686,6 +690,17 @@ name = "mayor"
 	}
 	if cfg.Beads.Policies != nil {
 		t.Errorf("Beads.Policies = %v, want nil", cfg.Beads.Policies)
+	}
+}
+
+func TestParseRequiredCategoriesRejectsEmptyAndDuplicateValues(t *testing.T) {
+	for _, data := range []string{
+		"[beads]\nrequired_categories = []\n",
+		"[beads]\nrequired_categories = [\"product\", \"product\"]\n",
+	} {
+		if _, err := Parse([]byte(data)); err == nil {
+			t.Fatalf("Parse(%q) = nil, want required category validation error", data)
+		}
 	}
 }
 
@@ -746,9 +761,10 @@ func TestBeadsConfigRoundTripPreservesStagedFields(t *testing.T) {
 	c := City{
 		Workspace: Workspace{Name: "test"},
 		Beads: BeadsConfig{
-			Provider:   "bd",
-			Backend:    "doltlite",
-			EventHooks: &disabled,
+			Provider:           "bd",
+			Backend:            "doltlite",
+			EventHooks:         &disabled,
+			RequiredCategories: []string{"product", "infrastructure"},
 			Policies: map[string]BeadPolicyConfig{
 				"control": {
 					Storage:          BeadStorageNoHistory,
@@ -771,6 +787,9 @@ func TestBeadsConfigRoundTripPreservesStagedFields(t *testing.T) {
 	}
 	if got.Beads.Backend != "doltlite" {
 		t.Errorf("round-tripped Backend = %q, want doltlite", got.Beads.Backend)
+	}
+	if got, want := got.Beads.RequiredCategories, []string{"product", "infrastructure"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("round-tripped RequiredCategories = %v, want %v", got, want)
 	}
 	if got.Beads.Policies["control"].DeleteAfterClose != "48h" {
 		t.Errorf("round-tripped policy = %#v, want delete_after_close=48h", got.Beads.Policies["control"])

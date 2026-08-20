@@ -75,6 +75,63 @@ func TestBeadPolicyStorePreservesConditionalAssignmentReleaser(t *testing.T) {
 	}
 }
 
+func TestBeadPolicyStoreRejectsInvalidRequiredCategoryWithoutCreate(t *testing.T) {
+	backing := &captureCreateStore{Store: beads.NewMemStore()}
+	store := wrapStoreWithBeadPolicies(backing, &config.City{Beads: config.BeadsConfig{
+		RequiredCategories: []string{"product", "infrastructure"},
+	}})
+
+	for _, labels := range [][]string{nil, {"product", "infrastructure"}} {
+		if _, err := store.Create(beads.Bead{Title: "rejected", Type: "task", Labels: labels}); err == nil {
+			t.Fatalf("Create(labels=%v) = nil, want category error", labels)
+		}
+	}
+	if len(backing.created) != 0 {
+		t.Fatalf("backing creates = %d, want 0 after validation failures", len(backing.created))
+	}
+	if _, err := store.Create(beads.Bead{Title: "accepted", Type: "task", Labels: []string{"product", "theme:api"}}); err != nil {
+		t.Fatalf("accepted Create: %v", err)
+	}
+	if len(backing.created) != 1 {
+		t.Fatalf("backing creates = %d, want 1", len(backing.created))
+	}
+}
+
+func TestBeadPolicyStoreLeavesInfrastructureBeadsUnclassified(t *testing.T) {
+	backing := &captureCreateStore{Store: beads.NewMemStore()}
+	store := wrapStoreWithBeadPolicies(backing, &config.City{Beads: config.BeadsConfig{
+		RequiredCategories: []string{"product", "infrastructure"},
+	}})
+
+	if _, err := store.Create(beads.Bead{Title: "session", Type: "session", Labels: []string{"gc:session"}}); err != nil {
+		t.Fatalf("infrastructure Create: %v", err)
+	}
+	if len(backing.created) != 1 {
+		t.Fatalf("backing creates = %d, want 1", len(backing.created))
+	}
+}
+
+func TestBeadPolicyGraphStoreRejectsInvalidCategoryBeforeApply(t *testing.T) {
+	backing := &captureGraphStore{Store: beads.NewMemStore()}
+	store := wrapStoreWithBeadPolicies(backing, &config.City{Beads: config.BeadsConfig{
+		RequiredCategories: []string{"product", "infrastructure"},
+	}})
+	graph, ok := beads.GraphApplyFor(store)
+	if !ok {
+		t.Fatal("wrapped store does not expose graph apply")
+	}
+	_, err := graph.ApplyGraphPlan(context.Background(), &beads.GraphApplyPlan{Nodes: []beads.GraphApplyNode{
+		{Key: "root", Title: "root", Labels: []string{"product"}},
+		{Key: "step", Title: "step"},
+	}})
+	if err == nil {
+		t.Fatal("ApplyGraphPlan = nil, want category error")
+	}
+	if backing.plan != nil {
+		t.Fatal("backing graph applier received rejected plan")
+	}
+}
+
 func (s *captureGraphStore) ApplyGraphPlan(_ context.Context, plan *beads.GraphApplyPlan) (*beads.GraphApplyResult, error) {
 	next := *plan
 	s.plan = &next
