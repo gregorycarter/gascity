@@ -63,6 +63,18 @@ func (c *CachingStore) Update(id string, opts UpdateOpts) error {
 	if c.updateMatchesCached(id, opts) {
 		return nil
 	}
+	// Status transitions are ownership/lifecycle writes. When the cache has a
+	// revisioned snapshot, fence them against that snapshot so a worker holding
+	// an old open or in-progress row cannot write its status over a newer close
+	// (or another claim). Without this, the cache's stale read is passed to an
+	// unconditional backing Update and a terminal bead can be resurrected.
+	if opts.Status != nil {
+		if revision, ok := c.cachedRevisionForStatusUpdate(id); ok {
+			if writer, capable := ConditionalWriterFor(c.conditionalBacking()); capable {
+				return c.updateStatusWithCachedFence(id, revision, opts, writer)
+			}
+		}
+	}
 	if err := c.backing.Update(id, opts); err != nil {
 		return err
 	}
@@ -128,6 +140,56 @@ func (c *CachingStore) Update(id string, opts UpdateOpts) error {
 	c.updateStatsLocked()
 	c.mu.Unlock()
 
+	c.notifyChange("bead.updated", fresh)
+	return nil
+}
+
+func (c *CachingStore) cachedRevisionForStatusUpdate(id string) (int64, bool) {
+	if id == "" {
+		return 0, false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.state != cacheLive && c.state != cachePartial {
+		return 0, false
+	}
+	if _, dirty := c.dirty[id]; dirty {
+		return 0, false
+	}
+	bead, ok := c.beads[id]
+	if !ok || bead.Revision <= 0 {
+		return 0, false
+	}
+	return bead.Revision, true
+}
+
+func (c *CachingStore) updateStatusWithCachedFence(id string, revision int64, opts UpdateOpts, writer ConditionalWriter) error {
+	if err := writer.UpdateIfMatch(id, revision, opts); err != nil {
+		c.applyConditionalWriteFailure(id, err)
+		return err
+	}
+
+	// This is an internal fence around the ordinary Update path, so retain its
+	// live-cache behavior after the authoritative refresh. The public
+	// UpdateIfMatch path evicts by design because it cannot attribute a refresh
+	// to the fenced write; here the caller already chose the cache's observed
+	// revision and expects a normal Update result.
+	fresh, refreshed := c.refreshBeadAfterWrite(id, "refresh bead after fenced status update")
+	if !refreshed {
+		c.evictForConditionalWrite(id)
+		return nil
+	}
+	c.mu.Lock()
+	c.noteLocalMutationLocked(id)
+	c.absorbFreshLocked(id, fresh, time.Now(), absorbOpts{
+		depsMode:   depsFromFields,
+		seqMode:    seqKeep,
+		clearDirty: true,
+	})
+	c.clearDependentReadyProjectionsLocked(id)
+	c.markFreshLocked(time.Now())
+	c.updateStatsLocked()
+	c.mu.Unlock()
 	c.notifyChange("bead.updated", fresh)
 	return nil
 }

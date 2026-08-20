@@ -331,6 +331,39 @@ func TestCachingStoreIgnoresStaleClosedEventAfterLocalReopen(t *testing.T) {
 	}
 }
 
+func TestCachingStoreStatusUpdateCannotResurrectClosedBackingBead(t *testing.T) {
+	backing := beads.NewMemStore()
+	created, err := backing.Create(beads.Bead{Title: "terminal work"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	cache := beads.NewCachingStoreForTest(backing, nil)
+	if err := cache.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+
+	// Keep the cache's open revision, then close the backing through another
+	// writer. A stale worker attempting to claim the old snapshot must lose the
+	// revision race instead of reopening the terminal bead.
+	if err := backing.Close(created.ID); err != nil {
+		t.Fatalf("Close backing: %v", err)
+	}
+	inProgress := "in_progress"
+	err = cache.Update(created.ID, beads.UpdateOpts{Status: &inProgress})
+	if !beads.IsPreconditionFailed(err) {
+		t.Fatalf("stale status update error = %v, want precondition failure", err)
+	}
+
+	got, err := backing.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get backing: %v", err)
+	}
+	if got.Status != "closed" {
+		t.Fatalf("backing status after stale update = %q, want closed", got.Status)
+	}
+}
+
 func TestCachingStoreIgnoresStaleUpdateEventAfterLocalDelete(t *testing.T) {
 	mem := beads.NewMemStore()
 	created, err := mem.Create(beads.Bead{Title: "delete me"})
