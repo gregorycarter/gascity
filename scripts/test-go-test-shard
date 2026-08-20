@@ -80,6 +80,7 @@ run_in_test_env() {
     GOVCS="${GOVCS-}" \
     GOWORK="${GOWORK-}" \
     GC_FAST_UNIT="${GC_FAST_UNIT:-0}" \
+    GC_ALLOW_AMBIENT_BEADS_IN_TESTS=1 \
     CGO_CPPFLAGS="${cgo_cppflags}" \
     CGO_LDFLAGS="${cgo_ldflags}" \
     GC_TEST_SHARD_INDEX="${shard_index}" \

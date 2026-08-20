@@ -354,7 +354,8 @@ func TestGoTestShardWithoutTimingPreservesDirectProductContract(t *testing.T) {
 		"GOROOT": filepath.Join(fixture.tmpDir, "goroot"), "GOENV": "", "GOFLAGS": "", "GO111MODULE": "",
 		"GOEXPERIMENT": "", "GOPROXY": "", "GOPRIVATE": "", "GONOPROXY": "", "GONOSUMDB": "",
 		"GOSUMDB": "", "GOINSECURE": "", "GOVCS": "", "GOWORK": "", "GC_FAST_UNIT": "0",
-		"CGO_CPPFLAGS": "", "CGO_LDFLAGS": "", "GC_TEST_SHARD_INDEX": "1", "GC_TEST_SHARD_TOTAL": "2",
+		"GC_ALLOW_AMBIENT_BEADS_IN_TESTS": "1",
+		"CGO_CPPFLAGS":                    "", "CGO_LDFLAGS": "", "GC_TEST_SHARD_INDEX": "1", "GC_TEST_SHARD_TOTAL": "2",
 	}
 	if got := fixtureEnvironment(t, readFixtureFile(t, fixture.productEnvFile)); !maps.Equal(got, wantEnv) {
 		t.Fatalf("direct product environment = %#v, want %#v", got, wantEnv)
