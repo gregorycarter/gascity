@@ -266,6 +266,74 @@ func recordResetStallIfDue(
 	}
 }
 
+// retryResetStallIfDue re-commits a stalled reset after its startup timeout.
+// Reset-pending is deliberately durable so the next wake starts a fresh
+// conversation, but a failed start can leave that handoff stranded forever.
+// This helper gives the handoff three bounded attempts over ten minutes while
+// keeping the retry schedule in the reconciler's per-session tracker.
+func retryResetStallIfDue(
+	info sessionpkg.Info,
+	tp TemplateParams,
+	alive bool,
+	startupTimeout time.Duration,
+	now time.Time,
+	dt *drainTracker,
+	sessFront *sessionpkg.Store,
+	rec events.Recorder,
+	stderr io.Writer,
+) (sessionpkg.Info, bool) {
+	resetCommittedAt, committedAt, pending := resetPendingCommittedAtInfo(info)
+	if !pending || alive || strings.TrimSpace(info.WaitHold) != "" || startupTimeout <= 0 || sessFront == nil || dt == nil {
+		return info, false
+	}
+	if now.Sub(committedAt) <= startupTimeout {
+		dt.clearResetStallRetry(info.ID)
+		return info, false
+	}
+	attempt, due := dt.beginResetStallRetry(info.ID, now)
+	if !due {
+		return info, false
+	}
+	newSessionKey, hasCapability := freshRestartSessionKeyInfo(tp, info)
+	batch := sessionpkg.RestartRequestPatch(newSessionKey, now)
+	if hasCapability && newSessionKey == "" {
+		batch["session_key"] = ""
+	}
+	updated, err := sessFront.ApplyPatchInfo(info, batch)
+	if err != nil {
+		if stderr == nil {
+			stderr = io.Discard
+		}
+		fmt.Fprintf(stderr, "session reconciler: reset retry %d/%d failed for %s: %v\n", attempt, resetStallRetryLimit, info.SessionNameMetadata, err) //nolint:errcheck
+		if attempt == resetStallRetryLimit {
+			name := strings.TrimSpace(info.SessionNameMetadata)
+			if name == "" {
+				name = info.ID
+			}
+			finalMessage := fmt.Sprintf("session reconciler: reset retry exhausted for %s after %d attempts; leaving reset pending for operator escalation", name, resetStallRetryLimit)
+			fmt.Fprintln(stderr, finalMessage) //nolint:errcheck
+			if rec != nil {
+				rec.Record(events.Event{
+					Type:      events.SessionResetStalled,
+					Actor:     "gc",
+					Subject:   name,
+					Message:   finalMessage,
+					SessionID: info.ID,
+					Payload: events.SessionResetStalledPayloadJSON(
+						name,
+						tp.TemplateName,
+						resetCommittedAt,
+						int(now.Sub(committedAt)/time.Second),
+					),
+				})
+			}
+			dt.failResetStallRetry(info.ID, attempt)
+		}
+		return info, false
+	}
+	return updated, true
+}
+
 func drainAckAsyncStopKey(sessionID, name string) string {
 	if id := strings.TrimSpace(sessionID); id != "" {
 		return "id:" + id
@@ -2160,6 +2228,9 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 		}
 		peek := cachedSessionPeek(cityPath, store, sp, cfg, id, tp.Hints.ProcessNames)
 		recordResetStallIfDue(infoByID[id], tp.TemplateName, name, alive, startupTimeout, clk.Now().UTC(), dt, rec, stderr, trace)
+		if retriedInfo, retried := retryResetStallIfDue(infoByID[id], tp, alive, startupTimeout, clk.Now().UTC(), dt, sessFront, rec, stderr); retried {
+			tick.set(id, retriedInfo)
+		}
 
 		// Zombie capture: session exists but process dead — grab scrollback for forensics.
 		// markProviderTerminalError persists + folds its write onto the snapshot in one

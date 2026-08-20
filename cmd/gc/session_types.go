@@ -68,13 +68,20 @@ type idleProbeState struct {
 	completedAt time.Time
 }
 
+type resetStallRetryState struct {
+	attempts    int
+	nextRetryAt time.Time
+	exhausted   bool
+}
+
 // drainTracker manages in-memory drain states for all sessions.
 type drainTracker struct {
 	mu               sync.Mutex
 	drains           map[string]*drainState     // session bead ID -> drain state
 	idleProbes       map[string]*idleProbeState // session bead ID -> async idle probe
 	resetStalls      map[string]bool            // session bead ID -> reset stall event emitted
-	suspendDeferrals map[string]int             // session bead ID -> consecutive ticks a named session has been suspend-drain-eligible with its spec absent (#3630)
+	resetRetries     map[string]*resetStallRetryState
+	suspendDeferrals map[string]int // session bead ID -> consecutive ticks a named session has been suspend-drain-eligible with its spec absent (#3630)
 	idleProbeCursor  int
 }
 
@@ -83,6 +90,7 @@ func newDrainTracker() *drainTracker {
 		drains:           make(map[string]*drainState),
 		idleProbes:       make(map[string]*idleProbeState),
 		resetStalls:      make(map[string]bool),
+		resetRetries:     make(map[string]*resetStallRetryState),
 		suspendDeferrals: make(map[string]int),
 	}
 }
@@ -236,6 +244,64 @@ func (dt *drainTracker) clearResetStall(beadID string) {
 	dt.mu.Lock()
 	defer dt.mu.Unlock()
 	delete(dt.resetStalls, beadID)
+	delete(dt.resetRetries, beadID)
+}
+
+const (
+	resetStallRetryLimit       = 3
+	resetStallRetrySecondDelay = 2 * time.Minute
+	resetStallRetryThirdDelay  = 8 * time.Minute
+)
+
+// beginResetStallRetry reserves the next reset retry when its backoff has
+// elapsed. The first retry is immediate; subsequent retries are scheduled two
+// and eight minutes later, respectively, for three total attempts over ten
+// minutes. The reservation happens before the write so a slow or failed store
+// cannot cause multiple retries in one controller tick.
+func (dt *drainTracker) beginResetStallRetry(beadID string, now time.Time) (int, bool) {
+	if dt == nil || strings.TrimSpace(beadID) == "" {
+		return 0, false
+	}
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	state := dt.resetRetries[beadID]
+	if state == nil {
+		state = &resetStallRetryState{}
+		dt.resetRetries[beadID] = state
+	}
+	if state.exhausted || state.attempts >= resetStallRetryLimit || (!state.nextRetryAt.IsZero() && now.Before(state.nextRetryAt)) {
+		return 0, false
+	}
+	state.attempts++
+	switch state.attempts {
+	case 1:
+		state.nextRetryAt = now.Add(resetStallRetrySecondDelay)
+	case 2:
+		state.nextRetryAt = now.Add(resetStallRetryThirdDelay)
+	default:
+		state.nextRetryAt = time.Time{}
+	}
+	return state.attempts, true
+}
+
+func (dt *drainTracker) failResetStallRetry(beadID string, attempt int) {
+	if dt == nil || strings.TrimSpace(beadID) == "" || attempt < resetStallRetryLimit {
+		return
+	}
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	if state := dt.resetRetries[beadID]; state != nil {
+		state.exhausted = true
+	}
+}
+
+func (dt *drainTracker) clearResetStallRetry(beadID string) {
+	if dt == nil || strings.TrimSpace(beadID) == "" {
+		return
+	}
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	delete(dt.resetRetries, beadID)
 }
 
 // Reconciler tuning defaults.
