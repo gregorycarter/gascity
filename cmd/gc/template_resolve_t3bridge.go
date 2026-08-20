@@ -59,6 +59,9 @@ func buildT3BridgeStartupEnvelope(tp TemplateParams, startupPrompt string) json.
 			"workDir":          tp.WorkDir,
 			"command":          tp.Command,
 		},
+		"assignment": map[string]any{
+			"beadId": tp.WorkBeadID,
+		},
 		"startup": map[string]any{
 			"promptTemplate": tp.TemplateName,
 			"startupPrompt":  startupPrompt,
@@ -80,6 +83,9 @@ func buildT3BridgeStartupEnvelope(tp TemplateParams, startupPrompt string) json.
 			"requiredThreadProvider": provider,
 			"requiredThreadModel":    t3BridgeStartupEnvelopeModel(provider, tp),
 		},
+	}
+	if branch := strings.TrimSpace(tp.WorkBranch); branch != "" {
+		envelope["runtime"].(map[string]any)["branch"] = branch
 	}
 	data, err := json.Marshal(envelope)
 	if err != nil {

@@ -181,6 +181,7 @@ type scaleCheckDemand struct {
 	Packs       map[string]string
 	Workspaces  map[string]string
 	StoreRefs   map[string]string
+	Branches    map[string]string
 	// ParentSIDs maps work-bead id → gc.brain_parent_sid, carrying the fork
 	// parent through to the new pool session bead so the launch path can fork
 	// the warm arm off its pre-built brain.
@@ -1689,6 +1690,12 @@ func defaultScaleCheckCountsAndDemand(cfg *config.City, targets []defaultScaleCh
 				}
 				entry.Workspaces[b.ID] = workspace
 			}
+			if branch := workBranch(b); branch != "" {
+				if entry.Branches == nil {
+					entry.Branches = make(map[string]string)
+				}
+				entry.Branches[b.ID] = branch
+			}
 			if entry.StoreRefs == nil {
 				entry.StoreRefs = make(map[string]string)
 			}
@@ -1728,6 +1735,9 @@ func mergeScaleCheckDemand(existing, incoming scaleCheckDemand, count int) scale
 	if existing.ParentSIDs == nil && len(incoming.ParentSIDs) > 0 {
 		existing.ParentSIDs = make(map[string]string, len(incoming.ParentSIDs))
 	}
+	if existing.Branches == nil && len(incoming.Branches) > 0 {
+		existing.Branches = make(map[string]string, len(incoming.Branches))
+	}
 	for _, id := range incoming.WorkBeadIDs[:limit] {
 		if strings.TrimSpace(id) == "" {
 			continue
@@ -1749,6 +1759,9 @@ func mergeScaleCheckDemand(existing, incoming scaleCheckDemand, count int) scale
 			if sid := incoming.ParentSIDs[id]; sid != "" {
 				existing.ParentSIDs[id] = sid
 			}
+		}
+		if incoming.Branches != nil {
+			existing.Branches[id] = incoming.Branches[id]
 		}
 	}
 	existing.Count = len(existing.WorkBeadIDs)
@@ -2973,6 +2986,9 @@ func realizePoolDesiredSessions(
 		// bind fold and every downstream identity read flow through Info.
 		sbInfo := item.sessionInfo
 		slot := item.slot
+		if strings.TrimSpace(item.request.WorkBranch) == "" {
+			item.request.WorkBranch = workBranchForBeadID(bp.assignedWorkBeads, item.request.WorkBeadID)
+		}
 		manualSession := isManualSessionInfoForAgent(sbInfo, cfgAgent)
 		var (
 			resolveAgent      *config.Agent
@@ -3002,6 +3018,13 @@ func realizePoolDesiredSessions(
 		if err != nil {
 			fmt.Fprintf(stderr, "buildDesiredState: pool %q session %s: %v (skipping)\n", qualifiedName, sbInfo.ID, err) //nolint:errcheck
 			continue
+		}
+		tp.WorkBeadID = strings.TrimSpace(item.request.WorkBeadID)
+		tp.WorkBranch = strings.TrimSpace(item.request.WorkBranch)
+		if tp.WorkBranch != "" {
+			if workDir := poolTriggerWorkDir(bp, cfgAgent, qualifiedInstance, item.request); workDir != "" {
+				tp.WorkDir = workDir
+			}
 		}
 		if manualSession {
 			tp.ManualSession = true
@@ -3149,6 +3172,15 @@ func poolTriggerWorkDir(bp *agentBuildParams, cfgAgent *config.Agent, qualifiedN
 	if bp == nil || cfgAgent == nil || strings.TrimSpace(request.WorkBeadID) == "" {
 		return ""
 	}
+	if strings.TrimSpace(request.WorkBranch) != "" {
+		rigName := configuredRigName(bp.cityPath, cfgAgent, bp.rigs)
+		if rigName == "" {
+			rigName = "unscoped"
+		}
+		if workID := safeWorkspaceName(request.WorkBeadID, 96); workID != "" {
+			return filepath.Join(bp.cityPath, ".gc", "worktrees", rigName, "review", workID)
+		}
+	}
 	base, err := resolveConfiguredWorkDir(bp.cityPath, bp.cityName, qualifiedName, cfgAgent, bp.rigs)
 	if err != nil || strings.TrimSpace(base) == "" {
 		return ""
@@ -3164,6 +3196,19 @@ func poolTriggerWorkDir(bp *agentBuildParams, cfgAgent *config.Agent, qualifiedN
 		return filepath.Join(base, workspace)
 	}
 	return base
+}
+
+func workBranchForBeadID(work []beads.Bead, id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	for _, bead := range work {
+		if bead.ID == id {
+			return workBranch(bead)
+		}
+	}
+	return ""
 }
 
 func packWorkspaceSlug(request SessionRequest) string {

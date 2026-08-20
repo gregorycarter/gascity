@@ -25,6 +25,7 @@ type SessionRequest struct {
 	WorkPack      string // pack route key from the work bead, when known
 	WorkWorkspace string // explicit pack workspace route key from the work bead, when known
 	WorkStoreRef  string // city or rig:<name> store reference for WorkBeadID when known
+	WorkBranch    string // branch recorded on the work bead, when branch-scoped routing is required
 	// BrainParentSID is gc.brain_parent_sid from the driving work bead, when
 	// set: the parent session to fork this launch off of (warm-arm fork-launch).
 	BrainParentSID string
@@ -42,6 +43,15 @@ func beadPriority(b beads.Bead) int {
 		return *b.Priority
 	}
 	return 0
+}
+
+func workBranch(b beads.Bead) string {
+	if branch := strings.TrimSpace(b.Metadata[beadmeta.WorkBranchMetadataKey]); branch != "" {
+		return branch
+	}
+	// Older routed work used the plain branch key. Keep accepting it while
+	// gc.work_branch remains the canonical claim-time record.
+	return strings.TrimSpace(b.Metadata["branch"])
 }
 
 // PoolDesiredState holds the desired state for a single agent template.
@@ -204,6 +214,7 @@ func computePoolDesiredStates(
 					WorkBeadTitle:  strings.TrimSpace(wb.Title),
 					WorkPack:       strings.TrimSpace(wb.Metadata[beadmeta.PackMetadataKey]),
 					WorkWorkspace:  strings.TrimSpace(wb.Metadata[beadmeta.PackWorkspaceMetadataKey]),
+					WorkBranch:     workBranch(wb),
 					BrainParentSID: strings.TrimSpace(wb.Metadata[beadmeta.BrainParentSIDMetadataKey]),
 				})
 				continue
@@ -238,6 +249,7 @@ func computePoolDesiredStates(
 				WorkBeadTitle:  strings.TrimSpace(wb.Title),
 				WorkPack:       strings.TrimSpace(wb.Metadata[beadmeta.PackMetadataKey]),
 				WorkWorkspace:  strings.TrimSpace(wb.Metadata[beadmeta.PackWorkspaceMetadataKey]),
+				WorkBranch:     workBranch(wb),
 				BrainParentSID: strings.TrimSpace(wb.Metadata[beadmeta.BrainParentSIDMetadataKey]),
 			})
 			if trace != nil {
@@ -303,6 +315,7 @@ func computePoolDesiredStates(
 				workPack := ""
 				workWorkspace := ""
 				workStoreRef := ""
+				workBranch := ""
 				workParentSID := ""
 				if demand := scaleCheckDemand[template]; len(demand.WorkBeadIDs) > j {
 					workBeadID = strings.TrimSpace(demand.WorkBeadIDs[j])
@@ -318,6 +331,9 @@ func computePoolDesiredStates(
 					if demand.StoreRefs != nil {
 						workStoreRef = strings.TrimSpace(demand.StoreRefs[workBeadID])
 					}
+					if demand.Branches != nil {
+						workBranch = strings.TrimSpace(demand.Branches[workBeadID])
+					}
 					if demand.ParentSIDs != nil {
 						workParentSID = strings.TrimSpace(demand.ParentSIDs[workBeadID])
 					}
@@ -330,6 +346,7 @@ func computePoolDesiredStates(
 					WorkPack:       workPack,
 					WorkWorkspace:  workWorkspace,
 					WorkStoreRef:   workStoreRef,
+					WorkBranch:     workBranch,
 					BrainParentSID: workParentSID,
 				}
 				allRequests = append(allRequests, req)

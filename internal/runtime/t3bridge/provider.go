@@ -2037,6 +2037,10 @@ func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) err
 		if err := json.Unmarshal([]byte(envJSON), &envelope); err != nil {
 			return fmt.Errorf("t3bridge: decode startup envelope: %w", err)
 		}
+	} else if len(cfg.StartupEnvelope) > 0 {
+		if err := json.Unmarshal(cfg.StartupEnvelope, &envelope); err != nil {
+			return fmt.Errorf("t3bridge: decode startup envelope: %w", err)
+		}
 	} else {
 		// Build envelope from cfg fields and env vars set by the reconciler.
 		cityPath := cfg.Env["GC_CITY_PATH"]
@@ -2075,6 +2079,12 @@ func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) err
 		branch = envelope.Runtime.Branch
 		newBranch = envelope.Runtime.NewBranch
 		desiredPath = cfg.WorkDir
+		if strings.TrimSpace(desiredPath) == "" {
+			desiredPath = envelope.Runtime.WorkDir
+		}
+		if samePath(desiredPath, cwd) {
+			return fmt.Errorf("t3bridge: branch-scoped session refuses rig root %q as workdir", cwd)
+		}
 	}
 
 	providerName, modelName := resolveProviderModel(cfg, envelope)
@@ -2298,6 +2308,20 @@ func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) err
 	}
 	p.clearSnapshotCache()
 	return nil
+}
+
+func samePath(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(aa) == filepath.Clean(bb)
 }
 
 // Stop tears down the session's event watcher and stops or archives its T3

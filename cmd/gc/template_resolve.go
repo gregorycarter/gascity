@@ -91,6 +91,11 @@ type TemplateParams struct {
 	RigName string
 	// RigRoot is the absolute path to the associated rig root (empty if none).
 	RigRoot string
+	// WorkBeadID identifies the routed work driving this session.
+	WorkBeadID string
+	// WorkBranch is the branch recorded on WorkBeadID when the session must
+	// start in a branch-scoped worktree.
+	WorkBranch string
 	// WakeMode controls whether the next wake resumes or starts fresh conversation state.
 	WakeMode string
 	// IsACP is true when the resolved session transport is SessionTransportACP.
@@ -921,6 +926,7 @@ func templateParamsToConfigWithDelivery(tp TemplateParams) (runtime.Config, prom
 	}
 	cfg.WorkDir = tp.WorkDir
 	cfg.FingerprintExtra = tp.FPExtra
+	cfg.StartupEnvelope = buildT3BridgeStartupEnvelope(tp, promptSuffix)
 	// Prompt delivery may prepend the startup prompt to the configured nudge.
 	cfg.Nudge = nudge
 	// ga-c4w: interactive `gc session new` sessions (session_origin=manual)

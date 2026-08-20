@@ -324,6 +324,29 @@ func TestStart_ReusedThreadDoesNotInjectStartupTurns(t *testing.T) {
 	}
 }
 
+func TestStart_BranchScopedStartupEnvelopeRefusesRigRootWorkDir(t *testing.T) {
+	p := &Provider{
+		watchers:     make(map[string]context.CancelFunc),
+		recentStarts: make(map[string]time.Time),
+	}
+	rawEnvelope, err := json.Marshal(StartupEnvelope{
+		GC:      GCSection{RigPath: "/data/projects/gascity", SessionName: "review--lane-1"},
+		Runtime: RuntimeSection{Provider: "codex", Model: "gpt-5.4", Branch: "polecat/review-1"},
+	})
+	if err != nil {
+		t.Fatalf("marshal startup envelope: %v", err)
+	}
+
+	err = p.Start(context.Background(), "review--lane-1", runtime.Config{
+		WorkDir:         "/data/projects/gascity",
+		Command:         "codex",
+		StartupEnvelope: rawEnvelope,
+	})
+	if err == nil || !strings.Contains(err.Error(), "rig root") {
+		t.Fatalf("Start error = %v, want branch-scoped rig-root refusal", err)
+	}
+}
+
 func TestBuildThreadEnv_DropsStartupEnvelopeAndDoltliteServerEnv(t *testing.T) {
 	env := buildThreadEnv(map[string]string{
 		"GC_STARTUP_ENVELOPE":      `{"runtime":{"provider":"claudeAgent","model":"claude-sonnet-4-6"}}`,

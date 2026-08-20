@@ -75,3 +75,41 @@ func TestBuildT3BridgeStartupEnvelope_NamedSessionPublishesTemplatePatchIdentity
 		t.Fatalf("gc.template = %#v, want crew", got)
 	}
 }
+
+func TestTemplateParamsToConfig_PublishesBranchScopedT3StartupEnvelope(t *testing.T) {
+	tp := TemplateParams{
+		TemplateName:             "review-lane",
+		InstanceName:             "review-lane-1",
+		SessionName:              "review--lane-1",
+		EffectiveSessionProvider: "t3bridge",
+		WorkDir:                  "/data/projects/gc/.gc/worktrees/gascity/review/review-1",
+		WorkBranch:               "polecat/review-1",
+		Prompt:                   "review the change",
+		Command:                  "codex",
+		Env: map[string]string{
+			"GC_CITY_PATH":    "/data/projects/gc",
+			"GC_RIG":          "gascity",
+			"GC_RIG_ROOT":     "/data/projects/gascity",
+			"GC_PROVIDER":     "codex",
+			"GC_AGENT":        "review-lane-1",
+			"GC_TEMPLATE":     "review-lane",
+			"GC_SESSION_NAME": "review--lane-1",
+		},
+	}
+
+	cfg := templateParamsToConfig(tp)
+	if len(cfg.StartupEnvelope) == 0 {
+		t.Fatal("StartupEnvelope is empty for a T3 branch-scoped session")
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(cfg.StartupEnvelope, &envelope); err != nil {
+		t.Fatalf("unmarshal StartupEnvelope: %v", err)
+	}
+	runtimeSection, ok := envelope["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime section missing: %#v", envelope["runtime"])
+	}
+	if got := runtimeSection["branch"]; got != "polecat/review-1" {
+		t.Fatalf("runtime.branch = %#v, want polecat/review-1", got)
+	}
+}

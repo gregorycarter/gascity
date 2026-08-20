@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 )
@@ -216,6 +217,22 @@ func TestComputePoolDesiredStates_ResumeBeatsNew(t *testing.T) {
 	}
 	if reqs[1].Tier != "new" {
 		t.Errorf("second request tier = %q, want new", reqs[1].Tier)
+	}
+}
+
+func TestComputePoolDesiredStates_CarriesAssignedWorkBranch(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{poolAgent("review", "rig", intPtr(1), 0)},
+	}
+	work := workBead("review-1", "rig/review", "sess-1", "in_progress", 1)
+	work.Metadata[beadmeta.WorkBranchMetadataKey] = "polecat/review-1"
+
+	result := ComputePoolDesiredStates(cfg, []beads.Bead{work}, sessionInfosFromBeads([]beads.Bead{sessionBead("sess-1", "open")}), nil)
+	if len(result) != 1 || len(result[0].Requests) != 1 {
+		t.Fatalf("result = %#v, want one pool request", result)
+	}
+	if got := result[0].Requests[0].WorkBranch; got != "polecat/review-1" {
+		t.Fatalf("work branch = %q, want polecat/review-1", got)
 	}
 }
 
