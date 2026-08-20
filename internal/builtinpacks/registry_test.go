@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 const testCommit = "abcdef123456abcdef123456abcdef123456abcd"
@@ -43,6 +44,43 @@ func TestAllAndSourceAreDeterministic(t *testing.T) {
 		if source != wantSource {
 			t.Fatalf("Source(%q) = %q, want %q", pack.Name, source, wantSource)
 		}
+	}
+}
+
+func TestGastownPackRefineryDiscoveryIncludesInProgress(t *testing.T) {
+	pack, ok := ByName("gastown")
+	if !ok {
+		t.Fatal("gastown pack is not registered")
+	}
+
+	data, err := fs.ReadFile(pack.FS, "formulas/mol-refinery-patrol.toml")
+	if err != nil {
+		t.Fatalf("read refinery patrol formula: %v", err)
+	}
+	body := string(data)
+	const staleQuery = "--assignee=$GC_AGENT --status=open \\\n"
+	if strings.Contains(body, staleQuery) {
+		t.Fatalf("refinery discovery still filters out in_progress beads:\n%s", body)
+	}
+	const expectedQuery = "--assignee=$GC_AGENT --status=open,in_progress \\\n"
+	if !strings.Contains(body, expectedQuery) {
+		t.Fatalf("refinery discovery query does not include open and in_progress:\n%s", body)
+	}
+}
+
+func TestPatchGastownPackLeavesCorrectedFormulaUnchanged(t *testing.T) {
+	const formula = "--assignee=$GC_AGENT --status=open,in_progress \\\n"
+	base := fstest.MapFS{
+		gastownRefineryFormulaPath: &fstest.MapFile{Data: []byte(formula)},
+	}
+
+	patched := patchGastownPack(base)
+	got, err := fs.ReadFile(patched, gastownRefineryFormulaPath)
+	if err != nil {
+		t.Fatalf("read corrected formula: %v", err)
+	}
+	if string(got) != formula {
+		t.Fatalf("corrected formula changed: %q", got)
 	}
 }
 
