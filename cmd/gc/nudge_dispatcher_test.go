@@ -127,6 +127,97 @@ func TestDispatchAllQueuedNudgesNoOpInLegacyMode(t *testing.T) {
 	}
 }
 
+func TestEnsureQueuedNudgePollersRestartsMissingLegacyPoller(t *testing.T) {
+	clearGCEnv(t)
+	disableManagedDoltRecoveryForTest(t)
+
+	dir := t.TempDir()
+	if err := enqueueQueuedNudge(dir, newQueuedNudge("worker", "check your hook", time.Now().Add(-time.Minute))); err != nil {
+		t.Fatalf("enqueueQueuedNudge: %v", err)
+	}
+	bead := beads.Bead{
+		ID:     "session-1",
+		Status: "open",
+		Metadata: map[string]string{
+			"session_name": "worker-session",
+			"agent_name":   "worker",
+			"template":     "worker",
+		},
+	}
+	snapshot := newSessionBeadSnapshot([]beads.Bead{bead})
+
+	var gotCityPath, gotAgent, gotSession string
+	previous := startNudgePoller
+	startNudgePoller = func(cityPath, agent, sessionName string) error {
+		gotCityPath = cityPath
+		gotAgent = agent
+		gotSession = sessionName
+		return nil
+	}
+	t.Cleanup(func() { startNudgePoller = previous })
+
+	cfg := &config.City{Agents: []config.Agent{{Name: "worker"}}}
+	if err := ensureQueuedNudgePollers(dir, cfg, snapshot); err != nil {
+		t.Fatalf("ensureQueuedNudgePollers: %v", err)
+	}
+	if gotCityPath != dir || gotAgent != "session-1" || gotSession != "worker-session" {
+		t.Fatalf("startNudgePoller = (%q, %q, %q), want (%q, %q, %q)", gotCityPath, gotAgent, gotSession, dir, "session-1", "worker-session")
+	}
+}
+
+func TestEnsureQueuedNudgePollersIgnoresEmptyQueue(t *testing.T) {
+	dir := t.TempDir()
+	previous := startNudgePoller
+	called := false
+	startNudgePoller = func(_, _, _ string) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { startNudgePoller = previous })
+
+	if err := ensureQueuedNudgePollers(dir, &config.City{}, newSessionBeadSnapshot(nil)); err != nil {
+		t.Fatalf("ensureQueuedNudgePollers: %v", err)
+	}
+	if called {
+		t.Fatal("startNudgePoller called for an empty queue")
+	}
+}
+
+func TestEnsureQueuedNudgePollersSkipsACPSessions(t *testing.T) {
+	clearGCEnv(t)
+	disableManagedDoltRecoveryForTest(t)
+
+	dir := t.TempDir()
+	if err := enqueueQueuedNudge(dir, newQueuedNudge("worker", "check your hook", time.Now().Add(-time.Minute))); err != nil {
+		t.Fatalf("enqueueQueuedNudge: %v", err)
+	}
+	snapshot := newSessionBeadSnapshot([]beads.Bead{{
+		ID:     "session-1",
+		Status: "open",
+		Metadata: map[string]string{
+			"session_name": "worker-session",
+			"agent_name":   "worker",
+			"template":     "worker",
+			"transport":    "acp",
+		},
+	}})
+
+	previous := startNudgePoller
+	called := false
+	startNudgePoller = func(_, _, _ string) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { startNudgePoller = previous })
+
+	if err := ensureQueuedNudgePollers(dir, &config.City{Agents: []config.Agent{{Name: "worker"}}}, snapshot); err != nil {
+		t.Fatalf("ensureQueuedNudgePollers: %v", err)
+	}
+	if called {
+		t.Fatal("startNudgePoller called for an ACP session")
+	}
+}
+
 func TestDispatchAllQueuedNudgesEmptyQueue(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)

@@ -3131,7 +3131,14 @@ func parseRFC3339Metadata(v string) (time.Time, bool) {
 // at the end of each patrol tick so a missed wake doesn't strand a queue
 // item past the patrol interval.
 func (cr *CityRuntime) nudgeDispatchTick(_ context.Context) {
+	sessionBeads := cr.loadSessionBeadSnapshot()
+	if sessionBeads == nil {
+		return
+	}
 	if !nudgeDispatcherIsSupervisor(cr.cfg) {
+		if err := ensureQueuedNudgePollers(cr.cityPath, cr.cfg, sessionBeads); err != nil {
+			fmt.Fprintf(cr.stderr, "%s: nudge poller recovery: %v\n", cr.logPrefix, err) //nolint:errcheck
+		}
 		return
 	}
 	// Nudge ops route through the nudges accessor; the session snapshot it pairs
@@ -3139,10 +3146,6 @@ func (cr *CityRuntime) nudgeDispatchTick(_ context.Context) {
 	// Both collapse to the city store today.
 	store := cr.nudgesBeadStore()
 	if store.Store == nil {
-		return
-	}
-	sessionBeads := cr.loadSessionBeadSnapshot()
-	if sessionBeads == nil {
 		return
 	}
 	if _, err := dispatchAllQueuedNudges(cr.cityPath, cr.cfg, store.Store, cr.sessionsBeadStore().Store, cr.sp, sessionBeads, cr.stderr); err != nil {

@@ -263,3 +263,47 @@ func logNudgeDispatchSkip(w io.Writer, reason, agent, session, detail string) {
 	}
 	logRoute(w, "nudge-dispatch-tick", "skip", reason, extra...)
 }
+
+// ensureQueuedNudgePollers keeps the legacy per-session delivery path alive
+// for sessions that already have queued work. Pollers are normally started by
+// the command that enqueues a nudge, but a poller can disappear independently
+// after a crash or restart. The controller is the durable owner of recovery,
+// so patrol must recreate the sidecar from the queue and session projections.
+func ensureQueuedNudgePollers(cityPath string, cfg *config.City, sessionBeads *sessionBeadSnapshot) error {
+	if cityPath == "" || sessionBeads == nil || nudgeDispatcherIsSupervisor(cfg) {
+		return nil
+	}
+	state, err := nudgequeue.LoadState(cityPath)
+	if err != nil {
+		return fmt.Errorf("loading queued nudges for poller recovery: %w", err)
+	}
+	if len(state.Pending) == 0 && len(state.InFlight) == 0 {
+		return nil
+	}
+
+	for _, info := range sessionBeads.OpenInfos() {
+		target := resolveNudgeTargetFromSessionInfo(cityPath, cfg, info)
+		if target.sessionName == "" || target.sessionTransport() == "acp" {
+			continue
+		}
+		matched := false
+		for _, item := range state.Pending {
+			if target.matchesQueueAgent(item.Agent) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			for _, item := range state.InFlight {
+				if target.matchesQueueAgent(item.Agent) {
+					matched = true
+					break
+				}
+			}
+		}
+		if matched {
+			maybeStartNudgePoller(target)
+		}
+	}
+	return nil
+}
