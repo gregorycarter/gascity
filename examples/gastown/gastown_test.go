@@ -720,6 +720,15 @@ func TestRefineryPromptRejectionFlowEnforcesClearOnMerge(t *testing.T) {
 
 	assertContainsInOrder(t, body,
 		"## Rejection Flow",
+		"re-stamping `gc.routed_to`",
+		"--status=open",
+		`--assignee=""`,
+		`--set-metadata rejection_reason="..."`,
+		`--set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}polecat"`,
+	)
+
+	assertContainsInOrder(t, body,
+		"## Rejection Flow",
 		"clear `rejection_reason` before `gc bd close`",
 		"--unset-metadata rejection_reason",
 	)

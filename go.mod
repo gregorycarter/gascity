@@ -45,6 +45,10 @@ require (
 	pgregory.net/rapid v1.2.0
 )
 
+// Pin the refinery rejection routing fix from the operator's pack fork until
+// the change is released by the canonical gascity-packs module.
+replace github.com/gastownhall/gascity-packs => github.com/gregorycarter/gascity-packs v0.4.1-0.20260820165004-3fd078457d8f
+
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.120.0 // indirect
