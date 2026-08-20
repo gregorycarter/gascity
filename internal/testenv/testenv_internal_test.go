@@ -1,8 +1,10 @@
 package testenv
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads/contract"
@@ -78,6 +80,57 @@ func TestDoltPortVarsAreLeakVectors(t *testing.T) {
 			t.Errorf("doltPortVars[%q] host var %q is missing from LeakVectorVars; every guarded Dolt host var must also be scrubbed", portVar, hostVar)
 		}
 	}
+}
+
+func TestRefuseAmbientBeadsStore(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(filepath.Join(root, ".beads"), 0o755); err != nil {
+		t.Fatalf("mkdir beads dir: %v", err)
+	}
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested dir: %v", err)
+	}
+	redirectPath := filepath.Join(root, ".beads", "redirect")
+	if err := os.WriteFile(redirectPath, []byte("/live/city/.beads\n"), 0o644); err != nil {
+		t.Fatalf("write redirect: %v", err)
+	}
+	t.Chdir(nested)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(AmbientBeadsOptOutVar, "")
+
+	assertPanicContains(t, "redirect", func() { refuseAmbientBeadsStore() })
+
+	t.Setenv(AmbientBeadsOptOutVar, "1")
+	refuseAmbientBeadsStore()
+	t.Setenv(AmbientBeadsOptOutVar, "")
+	if err := os.Remove(redirectPath); err != nil {
+		t.Fatalf("remove redirect: %v", err)
+	}
+
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".beads"), 0o755); err != nil {
+		t.Fatalf("mkdir home beads dir: %v", err)
+	}
+	configPath := filepath.Join(home, ".beads", "config.yaml")
+	if err := os.WriteFile(configPath, []byte("dolt:\n  shared-server: true\n"), 0o644); err != nil {
+		t.Fatalf("write home config: %v", err)
+	}
+	assertPanicContains(t, configPath, func() { refuseAmbientBeadsStore() })
+}
+
+func assertPanicContains(t *testing.T, want string, fn func()) {
+	t.Helper()
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatalf("call did not panic; want message containing %q", want)
+		}
+		if !strings.Contains(fmt.Sprint(recovered), want) {
+			t.Fatalf("panic = %q, want message containing %q", recovered, want)
+		}
+	}()
+	fn()
 }
 
 // newSyntheticCity builds a t.TempDir() tree with a city.toml marker at its

@@ -36,6 +36,7 @@ func TestInitScrubsLeakVectors(t *testing.T) {
 	cmd := exec.Command(exe, "-test.run=^TestInitScrubsLeakVectors$", "-test.v")
 	cmd.Env = []string{
 		"GC_TESTENV_CHILD=1",
+		testenv.AmbientBeadsOptOutVar + "=1",
 		"GC_FAST_UNIT=should-survive",
 	}
 	for _, name := range testenv.LeakVectorVars {
@@ -99,6 +100,7 @@ func TestInitPassthroughPreservesNamed(t *testing.T) {
 	cmd := exec.Command(exe, "-test.run=^TestInitPassthroughPreservesNamed$", "-test.v")
 	cmd.Env = []string{
 		"GC_TESTENV_CHILD=1",
+		testenv.AmbientBeadsOptOutVar + "=1",
 		testenv.PassthroughVar + "=" + strings.Join(keep, ","),
 	}
 	for _, name := range testenv.LeakVectorVars {
@@ -156,6 +158,7 @@ func TestInitSkipsScrubInTestscriptSubcommandMode(t *testing.T) {
 	cmd := exec.Command(fakeGC, "-test.run=^TestInitSkipsScrubInTestscriptSubcommandMode$", "-test.v")
 	cmd.Env = []string{
 		"GC_TESTENV_CHILD=1",
+		testenv.AmbientBeadsOptOutVar + "=1",
 	}
 	for _, name := range testenv.LeakVectorVars {
 		cmd.Env = append(cmd.Env, name+"=kept-"+name)
@@ -480,7 +483,7 @@ func TestInitRefusesProdDoltPort(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := append([]string{"GC_TESTENV_CHILD=1"}, tc.env...)
+			env := append([]string{"GC_TESTENV_CHILD=1", testenv.AmbientBeadsOptOutVar + "=1"}, tc.env...)
 			assertRefusesDoltPort(t, tc.bin, "TestInitRefusesProdDoltPort", "", env, tc.wantPanic, tc.wantOutput)
 		})
 	}

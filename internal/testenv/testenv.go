@@ -1,8 +1,10 @@
 // Package testenv scrubs leak-vector env vars at test-binary init time so a
 // leak from an agent session (e.g. GC_CITY pointing at a live city, or
 // GC_BEADS=bd pointing at a managed Dolt runtime) cannot reach test code and
-// corrupt that city or spawn orphaned infrastructure. See PR #746 for the
-// original city-env incident.
+// corrupt that city or spawn orphaned infrastructure. It also refuses to
+// start beneath a redirected .beads workspace or a Beads home config unless
+// the test explicitly opts in. See PR #746 for the original city-env
+// incident.
 //
 // Every real test directory in this repo must contain an untagged
 // `testenv_import_test.go` that blank-imports this package:
@@ -61,6 +63,12 @@
 // store traced back to test clients reaching the local server on port 3307
 // (ga-4c2ss6). For the rare legitimate case, set ProdDoltPortOptOutVar
 // (GC_ALLOW_PROD_DOLT_PORT_IN_TESTS) to "1".
+//
+// Ambient Beads workspace guard: a test binary started below a `.beads`
+// redirect or with a Beads config under HOME can otherwise let beads discover
+// a live store even after the environment scrub. Set AmbientBeadsOptOutVar
+// (GC_ALLOW_AMBIENT_BEADS_IN_TESTS) only for a deliberate test of that live
+// integration boundary.
 package testenv
 
 import (
@@ -115,20 +123,44 @@ const PassthroughVar = "GC_TESTENV_PASSTHROUGH"
 // invented merge-gate rejections of clean branches and could mask a genuine
 // misclassification regression.
 var LeakVectorVars = []string{
+	"BD_ALLOW_REMOTE_MIGRATE",
+	"BD_BACKEND",
+	"BD_DATABASE_BACKEND",
+	"BD_DB",
+	"BD_IGNORE_SCHEMA_SKEW",
+	"BEADS_BACKEND",
+	"BEADS_CENTRAL_CONFIG",
+	"BEADS_CREDENTIALS_FILE",
+	"BEADS_DB",
+	"BEADS_DB_PATH",
 	"BEADS_DIR",
 	"BEADS_DOLT_PASSWORD",
+	"BEADS_DOLT_AUTO_START",
+	"BEADS_DOLT_DATABASE",
 	"BEADS_DOLT_PORT",
+	"BEADS_DOLT_CREDENTIAL_COMMAND",
+	"BEADS_DOLT_DATA_DIR",
+	"BEADS_DOLT_REMOTESAPI_PORT",
+	"BEADS_DOLT_SERVER_DATABASE",
 	"BEADS_DOLT_SERVER_HOST",
+	"BEADS_DOLT_SERVER_MODE",
 	"BEADS_DOLT_SERVER_PORT",
+	"BEADS_DOLT_SERVER_SOCKET",
+	"BEADS_DOLT_SERVER_TLS",
 	"BEADS_DOLT_SERVER_USER",
+	"BEADS_DOLT_SHARED_SERVER",
 	"BEADS_HOLDER_TOKEN",
+	"BEADS_SHARED_SERVER_DIR",
 	"DOLT_ROOT_PATH",
+	"DOLT_ROOT_HOST",
 	"DO_NOT_TRACK",
 	"GC_AGENT",
 	"GC_ALIAS",
 	"GC_BEADS",
+	"GC_BEADS_BACKEND",
 	"GC_BEADS_CONDITIONAL_WRITES",
 	"GC_BEADS_GUARDED_RELEASE",
+	"GC_BEADS_PREFIX",
 	"GC_BEADS_SCOPE_ROOT",
 	"GC_BIN",
 	"GC_CITY",
@@ -139,13 +171,18 @@ var LeakVectorVars = []string{
 	"GC_DIR",
 	"GC_DISABLE_USAGE_METRICS",
 	"GC_DOLT",
+	"GC_DOLT_DATABASE",
 	"GC_DOLT_HOST",
 	"GC_DOLT_PASSWORD",
 	"GC_DOLT_PORT",
 	"GC_DOLT_USER",
 	"GC_HOME",
+	"GC_RIG",
+	"GC_RIG_ROOT",
 	"GC_SESSION_ID",
 	"GC_SESSION_NAME",
+	"GC_STORE_ROOT",
+	"GC_STORE_SCOPE",
 	"GC_TMUX_SESSION",
 }
 
@@ -159,6 +196,11 @@ const ProdDoltPort = "3307"
 // Dolt-port guard. Set it to "1" for the rare legitimate case where a test
 // process must deliberately target a local Dolt server on ProdDoltPort.
 const ProdDoltPortOptOutVar = "GC_ALLOW_PROD_DOLT_PORT_IN_TESTS"
+
+// AmbientBeadsOptOutVar names the explicit opt-out for the ambient Beads
+// workspace guard. Tests that deliberately exercise a live Beads/Dolt
+// integration must set it themselves; ordinary test runs must fail closed.
+const AmbientBeadsOptOutVar = "GC_ALLOW_AMBIENT_BEADS_IN_TESTS"
 
 // doltPortVars maps each env var that selects a Dolt server port to the env
 // var that selects the matching Dolt server host. An empty host var name
@@ -260,6 +302,62 @@ func doltStatePort(cityRoot string) (string, bool) {
 	return strconv.Itoa(state.Port), true
 }
 
+// ambientBeadsRedirect walks dir upward looking for a Beads redirect file.
+// A redirect is an external store-selection instruction, so its presence is
+// enough to refuse a normal test run: the test has not created that store and
+// cannot prove that it is safe to mutate.
+func ambientBeadsRedirect(dir string) (string, string, bool) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", "", false
+	}
+	for {
+		redirectPath := filepath.Join(abs, ".beads", "redirect")
+		if info, statErr := os.Stat(redirectPath); statErr == nil && !info.IsDir() {
+			data, readErr := os.ReadFile(redirectPath)
+			return redirectPath, strings.TrimSpace(string(data)), readErr == nil
+		}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			return "", "", false
+		}
+		abs = parent
+	}
+}
+
+// ambientBeadsHomeConfig reports a Beads config that the test did not create.
+// Beads reads this machine-level fallback when no project-local configuration
+// overrides it, and it may select a shared Dolt server or other live store.
+func ambientBeadsHomeConfig(home string) (string, bool) {
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return "", false
+	}
+	path := filepath.Join(home, ".beads", "config.yaml")
+	info, err := os.Stat(path)
+	return path, err == nil && !info.IsDir()
+}
+
+// refuseAmbientBeadsStore panics when the test binary starts in a workspace
+// whose Beads store is selected by an inherited redirect or HOME config. This
+// guard is intentionally conservative: a refused test costs one test run;
+// an unguarded schema ensure can migrate a live Dolt store. Deliberate live
+// integration tests must opt in with AmbientBeadsOptOutVar.
+func refuseAmbientBeadsStore() {
+	if os.Getenv(AmbientBeadsOptOutVar) == "1" {
+		return
+	}
+	wd, err := os.Getwd()
+	if err == nil {
+		if redirectPath, target, ok := ambientBeadsRedirect(wd); ok {
+			panic("testenv: ambient Beads redirect " + redirectPath + " -> " + target + " selects a store the test did not create; refusing to run tests against it (set " + AmbientBeadsOptOutVar + "=1 to deliberately allow it)")
+		}
+	}
+	if configPath, ok := ambientBeadsHomeConfig(os.Getenv("HOME")); ok {
+		panic("testenv: ambient Beads config " + configPath + " may select a live store; refusing to run tests against it (set " + AmbientBeadsOptOutVar + "=1 to deliberately allow it)")
+	}
+}
+
 // refuseProdDoltPort panics when a Dolt port var that will outlive init()
 // points at a production Dolt server. survives reports whether the named var
 // survives the scrub: always in testscript subcommand mode,
@@ -324,6 +422,7 @@ func init() {
 		// them: a testscript-driven gc/bd must never write to the production
 		// store either.
 		refuseProdDoltPort(func(string) bool { return true })
+		refuseAmbientBeadsStore()
 		return
 	}
 	keep := map[string]bool{}
@@ -336,6 +435,7 @@ func init() {
 	}
 	_ = os.Unsetenv(PassthroughVar)
 	refuseProdDoltPort(func(name string) bool { return keep[name] })
+	refuseAmbientBeadsStore()
 	for _, name := range LeakVectorVars {
 		if !keep[name] {
 			_ = os.Unsetenv(name)
