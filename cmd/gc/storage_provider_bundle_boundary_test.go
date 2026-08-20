@@ -16,8 +16,8 @@ package main
 //     so an out-of-tree provider cannot leak back here by accident;
 //   - the whole storage surface compiles identically with CGO on and off, so
 //     the pure-Go driver choice is a checked property rather than a comment;
-//   - the module graph carries no replace directive, so a build of this repo
-//     resolves the dependencies its manifest names and nothing else.
+//   - the module graph carries only the two operator-approved fork pins, so a
+//     build cannot silently redirect any other dependency.
 //
 // The last two are what a downstream fork relies on. A fork appends its own
 // factory in its own tree; these arms are what keep the seam it appends to
@@ -200,15 +200,14 @@ func TestStorageSurfaceCompilesIdenticallyWithAndWithoutCGO(t *testing.T) {
 	}
 }
 
-// TestModuleGraphCarriesNoReplaceDirective is the module-graph guarantee a
-// downstream fork builds on: this repo's dependencies are exactly what its
-// manifest names, at released versions, with nothing redirected. It is the
-// tree-side companion to scripts/check-gomod-replace.sh's released-semver-only
-// policy — that script gates what a change adds, this arm gates the result.
+// TestModuleGraphCarriesOnlyApprovedForkReplacements is the downstream fork's
+// module-graph guarantee: only the two explicit operator pins needed by the
+// live city may redirect a dependency, and their full pseudo-versions are
+// immutable here. Everything else remains exactly what the manifest names.
 //
 // A replace this parser cannot read is a violation, not a pass: silently
 // ignoring a line we cannot parse is how a guard goes blind.
-func TestModuleGraphCarriesNoReplaceDirective(t *testing.T) {
+func TestModuleGraphCarriesOnlyApprovedForkReplacements(t *testing.T) {
 	root := moduleRoot(t)
 	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
@@ -218,9 +217,31 @@ func TestModuleGraphCarriesNoReplaceDirective(t *testing.T) {
 	if len(malformed) > 0 {
 		t.Fatalf("go.mod has replace directives this guard cannot parse (lines %v); a manifest we cannot read is a violation, not a pass", malformed)
 	}
+	want := map[string]replaceDirective{
+		"github.com/gastownhall/gascity-packs": {
+			oldPath:    "github.com/gastownhall/gascity-packs",
+			newPath:    "github.com/gregorycarter/gascity-packs",
+			newVersion: "v0.4.1-0.20260820165004-3fd078457d8f",
+		},
+		"github.com/steveyegge/beads": {
+			oldPath:    "github.com/steveyegge/beads",
+			newPath:    "github.com/gregorycarter/beads",
+			newVersion: "v1.2.2-0.20260820081939-6c35a31db1ea",
+		},
+	}
 	for _, directive := range directives {
-		t.Errorf("go.mod line %d replaces %q with %q; this module graph carries no replace directive, so a build resolves the dependencies the manifest names and nothing else",
-			directive.line, directive.oldPath, directive.newPath)
+		expected, ok := want[directive.oldPath]
+		if !ok || directive.oldVersion != expected.oldVersion ||
+			directive.newPath != expected.newPath || directive.newVersion != expected.newVersion {
+			t.Errorf("go.mod line %d has unapproved replacement %q %q => %q %q",
+				directive.line, directive.oldPath, directive.oldVersion, directive.newPath, directive.newVersion)
+			continue
+		}
+		delete(want, directive.oldPath)
+	}
+	for oldPath, expected := range want {
+		t.Errorf("go.mod is missing required operator pin %q => %q %q",
+			oldPath, expected.newPath, expected.newVersion)
 	}
 	if anyGoWorkFile(t, root) {
 		t.Error("the tree commits a go.work; a workspace redirects the module graph for every go invocation started at or below it")
