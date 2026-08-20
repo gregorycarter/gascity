@@ -10889,6 +10889,97 @@ func TestReconcileSessionBeads_RecordsResetStallDiagnostic(t *testing.T) {
 	}
 }
 
+func TestResetStallRetriesWithBackoff(t *testing.T) {
+	base := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	store := beads.NewMemStore()
+	bead, err := store.Create(beads.Bead{
+		Title:  "worker",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"session_name":                 "worker",
+			"template":                     "worker",
+			"continuation_reset_pending":   "true",
+			sessionpkg.ResetCommittedAtKey: base.Add(-75 * time.Second).Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session bead: %v", err)
+	}
+	front := sessionpkg.NewStore(beads.SessionStore{Store: store})
+	info, err := front.Get(bead.ID)
+	if err != nil {
+		t.Fatalf("get session info: %v", err)
+	}
+	tp := TemplateParams{
+		TemplateName: "worker",
+		ResolvedProvider: &config.ResolvedProvider{
+			SessionIDFlag: "--session-id",
+		},
+	}
+	dt := newDrainTracker()
+	var stderr bytes.Buffer
+
+	if _, retried := retryResetStallIfDue(info, tp, false, time.Minute, base.Add(75*time.Second), dt, front, nil, &stderr); !retried {
+		t.Fatal("first stalled reset should retry immediately")
+	}
+	first, err := front.Get(bead.ID)
+	if err != nil {
+		t.Fatalf("get first retry: %v", err)
+	}
+	if first.ResetCommittedAt != base.Add(75*time.Second).Format(time.RFC3339) {
+		t.Fatalf("first reset_committed_at = %q, want retry timestamp", first.ResetCommittedAt)
+	}
+
+	if _, retried := retryResetStallIfDue(first, tp, false, time.Minute, base.Add(135*time.Second), dt, front, nil, &stderr); retried {
+		t.Fatal("retry before backoff should be deferred")
+	}
+	if _, retried := retryResetStallIfDue(first, tp, false, time.Minute, base.Add(195*time.Second), dt, front, nil, &stderr); !retried {
+		t.Fatal("second stalled reset should run after two-minute backoff")
+	}
+	second, err := front.Get(bead.ID)
+	if err != nil {
+		t.Fatalf("get second retry: %v", err)
+	}
+	if _, retried := retryResetStallIfDue(second, tp, false, time.Minute, base.Add(11*time.Minute+15*time.Second), dt, front, nil, &stderr); !retried {
+		t.Fatal("third stalled reset should run after remaining backoff")
+	}
+
+	failedStore := &failingMetadataBatchStore{MemStore: beads.NewMemStore(), failBatch: true}
+	failedBead, err := failedStore.Create(beads.Bead{
+		Title: "failed-worker",
+		Type:  sessionBeadType,
+		Metadata: map[string]string{
+			"session_name":                 "failed-worker",
+			"template":                     "worker",
+			"continuation_reset_pending":   "true",
+			sessionpkg.ResetCommittedAtKey: base.Add(-75 * time.Second).Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create failed session bead: %v", err)
+	}
+	failedFront := sessionpkg.NewStore(beads.SessionStore{Store: failedStore})
+	failedInfo, err := failedFront.Get(failedBead.ID)
+	if err != nil {
+		t.Fatalf("get failed session info: %v", err)
+	}
+	failedDT := newDrainTracker()
+	failedRec := events.NewFake()
+	for _, at := range []time.Duration{75 * time.Second, 195 * time.Second, 11*time.Minute + 15*time.Second} {
+		retryResetStallIfDue(failedInfo, tp, false, time.Minute, base.Add(at), failedDT, failedFront, failedRec, &stderr)
+	}
+	if !strings.Contains(stderr.String(), "reset retry 3/3 failed") {
+		t.Fatalf("stderr = %q, want final retry escalation", stderr.String())
+	}
+	if len(failedRec.Events) != 1 || !strings.Contains(failedRec.Events[0].Message, "reset retry exhausted") {
+		t.Fatalf("final reset events = %#v, want one escalation event", failedRec.Events)
+	}
+	if _, retried := retryResetStallIfDue(failedInfo, tp, false, time.Minute, base.Add(12*time.Minute), failedDT, failedFront, failedRec, &stderr); retried {
+		t.Fatal("reset should stop retrying after the final failed attempt")
+	}
+}
+
 // TestReconcileSessionBeads_ClosedOnDemandBeadReopensWhenInDesiredState
 // verifies the full reconciler-level cycle for on_demand named session
 // recovery: a closed session bead that is still in the desired state
