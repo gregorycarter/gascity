@@ -28,6 +28,11 @@ source "$repo_root/scripts/lib/test-slice.sh"
 gc_test_slice_reexec "$repo_root/scripts/test-local-parallel" "$@"
 # shellcheck source=lib/inner-parallelism.sh
 source "$repo_root/scripts/lib/inner-parallelism.sh"
+# shellcheck source=lib/common.sh
+source "$repo_root/scripts/lib/common.sh"
+cgo_cppflags="${CGO_CPPFLAGS:-}"
+cgo_ldflags="${CGO_LDFLAGS:-}"
+configure_cgo_platform_paths
 
 # Cross-invocation concurrency bound (ga-owh20p): at most
 # PUSH_GATE_MAX_CONCURRENT heavy-suite invocations run at once, city-wide,
@@ -62,6 +67,13 @@ unset GC_DOLT_PORT BEADS_DOLT_SERVER_PORT
 
 local_jobs="${LOCAL_TEST_JOBS:-$("$repo_root/scripts/test-local-job-count")}"
 cmd_gc_total="${CMD_GC_PROCESS_TOTAL:-6}"
+cmd_gc_manifest=""
+cmd_gc_manifest_stderr=""
+if [[ "$mode" != integration ]]; then
+  cmd_gc_manifest="$(mktemp "${TMPDIR:-/var/tmp}/gc-cmd-gc-manifest.XXXXXX")"
+  cmd_gc_manifest_stderr="${cmd_gc_manifest}.stderr"
+  trap 'rm -f "$cmd_gc_manifest" "$cmd_gc_manifest_stderr"; push_gate_release_slot "$gate_fd"' EXIT
+fi
 
 # One per-package go test budget for the unit sweep and the cmd/gc shards. The
 # fan-out runs LOCAL_TEST_JOBS heavyweight test binaries at once, so a package's
@@ -146,9 +158,63 @@ add_cmd_gc_shards() {
     if [[ -n "$tags" ]]; then
       command+=" GO_TEST_TAGS=${tags}"
     fi
+    command+=" GO_TEST_MANIFEST=$(printf '%q' "$cmd_gc_manifest")"
     command+=" ./scripts/test-go-test-shard ./cmd/gc ${i} ${cmd_gc_total}"
     add_job "${label_prefix}-${i}-of-${cmd_gc_total}" "$command"
   done
+}
+
+# Discovery runs TestMain and builds the complete cmd/gc test binary. Doing
+# that independently in every shard creates a synchronized compile/startup
+# wave, so under host contention all shards can appear stuck after printing
+# their linker warning and test names. Generate the inventory once, before the
+# fan-out, and let each shard only select its modulo of the shared manifest.
+generate_cmd_gc_manifest() {
+  local gc_fast_unit="$1"
+  echo "Discovering cmd/gc tests once for all shards"
+  if ! env -i \
+    PATH="${PATH}" \
+    HOME="${HOME:-}" \
+    USER="${USER:-}" \
+    LOGNAME="${LOGNAME:-}" \
+    SHELL="${SHELL:-/bin/sh}" \
+    LANG="${LANG:-C.UTF-8}" \
+    TMPDIR="${TMPDIR:-/var/tmp}" \
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
+    GOPATH="${gopath_val}" \
+    GOCACHE="${gocache_val}" \
+    GOMODCACHE="${gomodcache_val}" \
+    GOTMPDIR="${gotmpdir_val}" \
+    GOROOT="${GOROOT:-$goroot_val}" \
+    GOENV="${GOENV-}" \
+    GOFLAGS="${GOFLAGS-}" \
+    GO111MODULE="${GO111MODULE-}" \
+    GOEXPERIMENT="${GOEXPERIMENT-}" \
+    GOPROXY="${GOPROXY-}" \
+    GOPRIVATE="${GOPRIVATE-}" \
+    GONOPROXY="${GONOPROXY-}" \
+    GONOSUMDB="${GONOSUMDB-}" \
+    GOSUMDB="${GOSUMDB-}" \
+    GOINSECURE="${GOINSECURE-}" \
+    GOVCS="${GOVCS-}" \
+    GOWORK="${GOWORK-}" \
+    GC_FAST_UNIT="${gc_fast_unit}" \
+    GC_TEST_SHARD_INDEX=1 \
+    GC_TEST_SHARD_TOTAL="${cmd_gc_total}" \
+    CGO_CPPFLAGS="${cgo_cppflags}" \
+    CGO_LDFLAGS="${cgo_ldflags}" \
+    go test -count=1 -timeout "${go_test_timeout}" ./cmd/gc -list '^Test' \
+    2>"${cmd_gc_manifest_stderr}" | awk '/^Test[A-Z0-9_][A-Za-z0-9_]*$/ { print }' \
+    >"${cmd_gc_manifest}"; then
+    echo "cmd/gc test discovery failed; stderr:" >&2
+    sed -n '1,240p' "${cmd_gc_manifest_stderr}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cmd_gc_manifest}" ]] || ! awk '!/^Test[A-Z0-9_][A-Za-z0-9_]*$/ { invalid=1 } END { exit invalid }' "${cmd_gc_manifest}"; then
+    echo "cmd/gc test discovery produced an invalid manifest:" >&2
+    sed -n '1,240p' "${cmd_gc_manifest}" >&2
+    return 1
+  fi
 }
 
 add_productmetrics_testhook_job() {
@@ -224,6 +290,13 @@ fi
 # -parallel scope caveat) (ga-04m84s).
 inner_p="$(gc_inner_parallelism "$local_jobs" "${#jobspecs[@]}")"
 export GOFLAGS="${GOFLAGS:+$GOFLAGS }-p=${inner_p}"
+
+if [[ -n "$cmd_gc_manifest" ]]; then
+  case "$mode" in
+    fast) generate_cmd_gc_manifest 1 ;;
+    cmd-gc-process|full) generate_cmd_gc_manifest 0 ;;
+  esac
+fi
 
 cleanup_log_dir=1
 if [[ -n "${LOCAL_TEST_LOG_DIR:-}" ]]; then

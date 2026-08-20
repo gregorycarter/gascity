@@ -70,6 +70,27 @@ func TestLocalParallelUnitCoreDisablesTestResultCaching(t *testing.T) {
 	}
 }
 
+// TestLocalParallelCmdGCShardsShareDiscoveryManifest prevents every cmd/gc
+// shard from rebuilding and initializing the same large test binary during
+// -list discovery. That duplicate discovery wave is what turns host load into
+// an apparent hang before any shard reaches its selected tests.
+func TestLocalParallelCmdGCShardsShareDiscoveryManifest(t *testing.T) {
+	script := localParallelScript(t)
+	shardBody := shellFunctionBody(t, script, "add_cmd_gc_shards")
+	if !strings.Contains(shardBody, "GO_TEST_MANIFEST") {
+		t.Fatalf("cmd/gc shard jobs do not consume a shared GO_TEST_MANIFEST:\n%s", shardBody)
+	}
+
+	manifestIndex := strings.Index(script, "generate_cmd_gc_manifest")
+	fanoutIndex := strings.Index(script, "printf '%s\\0' \"${jobspecs[@]}\"")
+	if manifestIndex < 0 {
+		t.Fatal("test-local-parallel does not generate a shared cmd/gc discovery manifest")
+	}
+	if fanoutIndex < 0 || manifestIndex > fanoutIndex {
+		t.Fatalf("cmd/gc discovery manifest must be generated before fan-out (manifest=%d fanout=%d)", manifestIndex, fanoutIndex)
+	}
+}
+
 // TestFastParallelForwardsTimeoutOverridePastEnvScrub proves the documented
 // `GO_TEST_TIMEOUT=30m make test-fast-parallel` escape hatch actually reaches
 // the runner. The target wraps the script in TEST_ENV's `env -i`, which drops
