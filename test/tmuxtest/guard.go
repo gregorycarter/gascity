@@ -1,7 +1,7 @@
 // Package tmuxtest provides helpers for integration tests that need real tmux.
 //
 // Guard manages tmux session lifecycle for tests: it generates unique city
-// names with a "gctest-" prefix, tracks created sessions, and guarantees
+// names with independent prefix components, tracks created sessions, and guarantees
 // cleanup even on test failures. Three layers prevent orphan sessions:
 //
 //  1. Pre-sweep (TestMain): kill all gctest-* socket servers from prior crashes.
@@ -66,12 +66,12 @@ func RequireTmux(t testing.TB) {
 }
 
 // Guard manages tmux session lifecycle for a single test. It generates a
-// unique city name with the "gctest-" prefix and guarantees cleanup of all
-// sessions matching that city via t.Cleanup.
+// unique city name and guarantees cleanup of all sessions matching that city
+// via t.Cleanup.
 type Guard struct {
 	t          testing.TB
-	cityName   string // "gctest-<8hex>"
-	socketName string // tmux socket for isolation (defaults to cityName)
+	cityName   string // four random components used by the test city/Dolt name
+	socketName string // tmux socket; keeps the gctest-* sweep prefix
 }
 
 // NewGuard creates a guard with a unique city name. Registers t.Cleanup
@@ -89,9 +89,9 @@ func NewGuardWithSocket(t testing.TB, socketName string) *Guard {
 	if _, err := rand.Read(b); err != nil {
 		t.Fatalf("tmuxtest: generating random city name: %v", err)
 	}
-	cityName := fmt.Sprintf("gctest-%x", b)
+	cityName := cityNameFromRandomBytes(b)
 	if socketName == "" {
-		socketName = cityName
+		socketName = fmt.Sprintf("gctest-%x", b)
 	}
 
 	g := &Guard{t: t, cityName: cityName, socketName: socketName}
@@ -101,9 +101,13 @@ func NewGuardWithSocket(t testing.TB, socketName string) *Guard {
 	return g
 }
 
-// CityName returns the unique city name (e.g., "gctest-<8hex>").
+// CityName returns the unique city name used by the test configuration.
 func (g *Guard) CityName() string {
 	return g.cityName
+}
+
+func cityNameFromRandomBytes(b []byte) string {
+	return fmt.Sprintf("%c-%c-%c-%c", 'a'+b[0]%26, 'a'+b[1]%26, 'a'+b[2]%26, 'a'+b[3]%26)
 }
 
 // SocketName returns the tmux socket name used by this guard.

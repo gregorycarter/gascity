@@ -147,7 +147,8 @@ func TestTmuxSocketRootPatternsCoverKnownRuntimePrefixes(t *testing.T) {
 }
 
 func TestNewGuardWithSocketCityNameFormat(t *testing.T) {
-	// City name must be "gctest-<8hex>" (no per-character hyphens).
+	// The default tmux socket name must be "gctest-<8hex>" (no
+	// per-character hyphens).
 	// macOS's UNIX socket path limit is 104 bytes; per-char hyphenation
 	// creates names like "gctest-4-f-d-9-6-0-8-c" (22 chars) instead of
 	// "gctest-4fd9608c" (15 chars), which pushes socket paths over the limit.
@@ -158,7 +159,14 @@ func TestNewGuardWithSocketCityNameFormat(t *testing.T) {
 		}
 		name := fmt.Sprintf("gctest-%x", b)
 		if len(name) != 15 {
-			t.Fatalf("city name %q has length %d, want 15", name, len(name))
+			t.Fatalf("socket name %q has length %d, want 15", name, len(name))
 		}
+	}
+}
+
+func TestCityNameUsesIndependentPrefixComponents(t *testing.T) {
+	got := cityNameFromRandomBytes([]byte{0, 1, 2, 3})
+	if got != "a-b-c-d" {
+		t.Fatalf("cityNameFromRandomBytes() = %q, want %q", got, "a-b-c-d")
 	}
 }
