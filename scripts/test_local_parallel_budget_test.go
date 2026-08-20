@@ -80,6 +80,9 @@ func TestLocalParallelCmdGCShardsShareDiscoveryManifest(t *testing.T) {
 	if !strings.Contains(shardBody, "GO_TEST_MANIFEST") {
 		t.Fatalf("cmd/gc shard jobs do not consume a shared GO_TEST_MANIFEST:\n%s", shardBody)
 	}
+	if !strings.Contains(shardBody, "GO_TEST_BINARY") {
+		t.Fatalf("cmd/gc shard jobs do not consume a shared GO_TEST_BINARY:\n%s", shardBody)
+	}
 
 	manifestIndex := strings.Index(script, "generate_cmd_gc_manifest")
 	fanoutIndex := strings.Index(script, "printf '%s\\0' \"${jobspecs[@]}\"")

@@ -97,6 +97,14 @@ run_go_test() {
   run_in_test_env go test "$@"
 }
 
+run_selected_go_test() {
+  local binary_args=("-test.timeout" "$timeout" "-test.run" "$regex")
+  if [[ -n "${GO_TEST_COUNT:-}" ]]; then
+    binary_args+=("-test.count" "$GO_TEST_COUNT")
+  fi
+  run_in_test_env "$GO_TEST_BINARY" "${binary_args[@]}"
+}
+
 run_observable_go_test() {
   local timing_name="${GO_TEST_TIMING_NAME:-${test_pkg#./}-shard-${shard_index}-of-${shard_total}}"
   local observable_env=(
@@ -215,6 +223,8 @@ echo "Running ${test_pkg} shard ${shard_index} of ${shard_total} (${#selected[@]
 printf '  %s\n' "${selected[@]}"
 if [[ -n "${GO_TEST_TIMING_FILE:-}" ]]; then
   run_observable_go_test "${go_test_args[@]}" "$test_pkg" -run "$regex"
+elif [[ -n "${GO_TEST_BINARY:-}" ]]; then
+  run_selected_go_test
 else
   run_go_test "${go_test_args[@]}" "$test_pkg" -run "$regex"
 fi
