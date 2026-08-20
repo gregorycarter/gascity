@@ -877,6 +877,29 @@ func TestPolecatPromptInlinesBranchConvention(t *testing.T) {
 	)
 }
 
+// TestPolecatPromptDrainsSilentlyWhenHookIsEmpty guards against a fresh
+// polecat turning a normal no-work result into a permanent HIGH escalation.
+// The prompt is the behavior source for the embedded pack, so keep the
+// no-work path explicit here rather than relying on a deployment overlay.
+func TestPolecatPromptDrainsSilentlyWhenHookIsEmpty(t *testing.T) {
+	path := filepath.Join(packRoot(), "packs", "gastown", "agents", "polecat", "prompt.template.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading polecat prompt: %v", err)
+	}
+
+	startup := sectionBetween(t, string(data), "## Startup Protocol", "## Context Exhaustion")
+	if strings.Contains(startup, "gc mail send") {
+		t.Fatalf("empty-hook startup path must not create escalation mail:\n%s", startup)
+	}
+	assertContainsInOrder(t, startup,
+		`if [ "$ACTION" = "drain" ]; then`,
+		`echo "NO_ROUTED_WORK"`,
+		"gc runtime drain-ack",
+		"exit 0",
+	)
+}
+
 func TestPolecatFormulaSelfReviewRendersAffectedTestModes(t *testing.T) {
 	fallback := cookPolecatSelfReviewDescription(t, map[string]string{
 		"issue":        "HW-42",
