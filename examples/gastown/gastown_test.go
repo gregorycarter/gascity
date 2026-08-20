@@ -3442,6 +3442,46 @@ func TestWitnessPatrolStateClassificationCoversSessionStates(t *testing.T) {
 	}
 }
 
+func TestWitnessPatrolOrphanCleanupProtectsLiveWorktrees(t *testing.T) {
+	formulaData, err := os.ReadFile(gastownRel("packs/gastown/formulas/mol-witness-patrol.toml"))
+	if err != nil {
+		t.Fatalf("reading witness patrol formula: %v", err)
+	}
+	helperData, err := os.ReadFile(gastownRel("packs/gastown/assets/scripts/witness-orphan-worktree-cleanup.sh"))
+	if err != nil {
+		t.Fatalf("reading witness orphan cleanup helper: %v", err)
+	}
+	formula := string(formulaData)
+	helper := string(helperData)
+
+	for _, want := range []string{
+		"witness-orphan-worktree-cleanup.sh",
+		".work_dir // .worktree",
+		"worker_dir",
+		"registered Git worktree",
+		"recursive-delete fallback",
+	} {
+		if !strings.Contains(formula, want) && !strings.Contains(helper, want) {
+			t.Errorf("witness orphan cleanup is missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"git -C \"$REPO_ROOT\" worktree list --porcelain",
+		"git -C \"$REPO_ROOT\" worktree remove --force",
+		"path_related",
+		"FINAL_ROSTER",
+		"read_roster \"$ROSTER\"",
+		"read_roster \"$FINAL_ROSTER\"",
+	} {
+		if !strings.Contains(helper, want) {
+			t.Errorf("witness orphan cleanup helper is missing %q", want)
+		}
+	}
+	if strings.Contains(formula, "rm -rf <worktree-path>") || strings.Contains(helper, "rm -rf") {
+		t.Fatal("witness orphan cleanup must not use recursive deletion")
+	}
+}
+
 // TestWitnessPatrolAllStepsContinueNotExit guards against the regression
 // in upstream #1884: every intermediate step in mol-witness-patrol must
 // tell the agent to continue rather than exit the wisp. The burn
