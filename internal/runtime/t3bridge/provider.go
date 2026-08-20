@@ -1091,6 +1091,10 @@ func (p *Provider) rpcCreateWorktree(cwd, branch, newBranch, path string) (strin
 
 // rpcRemoveWorktree calls git.removeWorktree via WebSocket.
 func (p *Provider) rpcRemoveWorktree(cwd, path string) error {
+	// Poetry must resolve the project while the worktree still exists. Cleanup
+	// is best-effort and never blocks the actual worktree removal.
+	removePoetryVenvs(path)
+
 	_, err := p.rpcCall("git.removeWorktree", map[string]interface{}{
 		"cwd":  cwd,
 		"path": path,
