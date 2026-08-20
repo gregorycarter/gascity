@@ -216,11 +216,42 @@ func rewriteBdHeartbeatArgs(bdArgs []string) ([]string, error) {
 	return []string{"update", rest[0], "--set-metadata", heartbeatMetadataKey + "=" + stamp}, nil
 }
 
+// refuseBdMigrateStatus blocks the ambiguous `gc bd migrate status` spelling.
+// The bd migrate command treats unrecognized positional arguments as its
+// metadata-update path, so a status-looking invocation can open a writable
+// store before it reports anything. Inspection must be explicit at this
+// boundary; callers can use --inspect or --dry-run when they need a
+// mutation-free result.
+func refuseBdMigrateStatus(args []string) error {
+	if len(args) < 2 || args[0] != "migrate" {
+		return nil
+	}
+
+	status := false
+	preview := false
+	for _, arg := range args[1:] {
+		switch arg {
+		case "status":
+			status = true
+		case "--inspect", "--inspect=true", "--dry-run", "--dry-run=true":
+			preview = true
+		}
+	}
+	if !status || preview {
+		return nil
+	}
+	return errors.New("refusing `gc bd migrate status`: use `gc bd migrate --inspect` or `gc bd migrate --dry-run` for mutation-free inspection")
+}
+
 func doBd(args []string, stdout, stderr io.Writer) int {
 	cityName, rigName, bdArgs := extractBdScopeFlags(args)
 
 	bdArgs, err := rewriteBdHeartbeatArgs(bdArgs)
 	if err != nil {
+		fmt.Fprintf(stderr, "gc bd: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := refuseBdMigrateStatus(bdArgs); err != nil {
 		fmt.Fprintf(stderr, "gc bd: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
