@@ -213,7 +213,10 @@ func (f compactScriptFixture) runWithArgs(t *testing.T, mode string, args []stri
 		"GC_DOLT_USER=root",
 		"GC_DOLT_PASSWORD=",
 		"GC_DOLT_MANAGED_LOCAL=1",
-		"GC_DOLT_COMPACT_CALL_TIMEOUT_SECS=5",
+		// Keep the shell call bounded, but leave enough room for the many
+		// short-lived fake-Dolt processes in parallel compact scenarios to
+		// start under normal host contention.
+		"GC_DOLT_COMPACT_CALL_TIMEOUT_SECS=30",
 		"GC_DOLT_COMPACT_PUSH_TIMEOUT_SECS=5",
 		"GC_FAKE_DOLT_COMPACT_MODE="+mode,
 		"GC_FAKE_DOLT_COUNT_FILE="+filepath.Join(f.binDir, "row-count-calls"),
