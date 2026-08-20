@@ -2003,6 +2003,11 @@ func (p *Provider) ListRunning(prefix string) ([]string, error) {
 		if deletedAt, ok := thread["deletedAt"]; ok && deletedAt != nil {
 			continue
 		}
+		session, _ := thread["session"].(map[string]interface{})
+		status, _ := session["status"].(string)
+		if status != "running" && status != "ready" {
+			continue
+		}
 		meta := threadCustomMetadata(thread)
 		name := SessionNameFromMetadata(meta)
 		if name == "" {

@@ -1061,3 +1061,44 @@ func TestListRunningSoftUnavailableIsRuntimeUnavailable(t *testing.T) {
 		t.Fatalf("ListRunning names = %v, want none alongside total observation failure", names)
 	}
 }
+
+func TestListRunningExcludesTerminalThreads(t *testing.T) {
+	server := newT3BridgeTestServer(t, map[string]interface{}{
+		"threads": []interface{}{
+			map[string]interface{}{
+				"id":        "thread-ready",
+				"projectId": "project-1",
+				"customMetadata": map[string]interface{}{
+					"gc.sessionName": "live-worker",
+				},
+				"session": map[string]interface{}{"status": "ready"},
+			},
+			map[string]interface{}{
+				"id":        "thread-done",
+				"projectId": "project-1",
+				"customMetadata": map[string]interface{}{
+					"gc.sessionName": "ghost-worker",
+				},
+				"session": map[string]interface{}{"status": "done"},
+			},
+		},
+	})
+	defer server.Close()
+	resetBridgeAuthCacheForTest(t)
+	t.Setenv("T3_BEARER_TOKEN", "")
+	t.Setenv("T3_WS_URL", server.wsURL())
+	t.Setenv("GC_T3BRIDGE_STATE_DIR", t.TempDir())
+
+	p := &Provider{
+		watchers:     make(map[string]context.CancelFunc),
+		recentStarts: make(map[string]time.Time),
+	}
+
+	names, err := p.ListRunning("")
+	if err != nil {
+		t.Fatalf("ListRunning: %v", err)
+	}
+	if len(names) != 1 || names[0] != "live-worker" {
+		t.Fatalf("ListRunning = %v, want [live-worker]", names)
+	}
+}

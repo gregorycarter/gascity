@@ -1907,10 +1907,15 @@ func (m *Manager) EnrichInfo(info Info) Info {
 		info.Transport = transport
 		_ = m.routeACPIfNeeded(info.Provider, transport, sessName)
 
-		// Surface stale "awake" / "active" beads as dormant immediately.
-		// The controller also heals metadata on the next tick.
-		if m.sp != nil && info.State == StateActive && !m.sp.IsRunning(sessName) {
-			info.State = StateAsleep
+		// Surface stale "awake" / "active" beads as dormant immediately. A
+		// provider registration alone is not enough: a crashed agent can leave
+		// the registration behind while its process is gone. The controller also
+		// heals the persisted metadata on the next tick.
+		if m.sp != nil && info.State == StateActive {
+			liveness := runtime.ObserveLiveness(m.sp, sessName, nil)
+			if !liveness.Alive {
+				info.State = StateAsleep
+			}
 		}
 	}
 

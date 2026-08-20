@@ -10,6 +10,18 @@ import (
 	"github.com/gastownhall/gascity/internal/runtime"
 )
 
+type registeredDeadRuntimeProvider struct {
+	*runtime.Fake
+}
+
+func (p *registeredDeadRuntimeProvider) IsRunning(string) bool {
+	return true
+}
+
+func (p *registeredDeadRuntimeProvider) ObserveLiveness(string, []string) runtime.Liveness {
+	return runtime.Liveness{Running: true, Alive: false}
+}
+
 // legacyEnrichFromBead reproduces the pre-refactor infoFromBead overlay reading
 // directly from the raw bead (via transportForBead). It is the independent
 // oracle for EnrichInfo: if transportForInfo ever diverges from transportForBead,
@@ -104,6 +116,29 @@ func TestEnrichInfoMatchesBeadOverlay(t *testing.T) {
 	enriched := m.EnrichInfos(infos)
 	if len(enriched) != 2 || !enriched[0].Attached || enriched[1].State != StateAsleep {
 		t.Errorf("EnrichInfos = %+v, want [attached, asleep]", enriched)
+	}
+}
+
+func TestEnrichInfo_DowngradesRegisteredRuntimeWithDeadProcess(t *testing.T) {
+	mgr := NewManagerWithOptions(beads.NewMemStore(), &registeredDeadRuntimeProvider{Fake: runtime.NewFake()})
+	info := Info{
+		ID:          "ghost-session",
+		State:       StateActive,
+		SessionName: "ghost-session",
+	}
+
+	got := mgr.EnrichInfo(info)
+	if got.State != StateAsleep {
+		t.Fatalf("state = %q, want asleep when the provider registration is present but its process is dead", got.State)
+	}
+}
+
+func TestEnrichInfo_PreservesActiveWithoutRuntimeProvider(t *testing.T) {
+	mgr := NewManagerWithOptions(beads.NewMemStore(), nil)
+	info := Info{ID: "unprobed-session", State: StateActive, SessionName: "unprobed-session"}
+
+	if got := mgr.EnrichInfo(info); got.State != StateActive {
+		t.Fatalf("state = %q, want active when no runtime provider is configured", got.State)
 	}
 }
 
