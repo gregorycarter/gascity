@@ -174,6 +174,41 @@ func TestParseDoltPSLine_IgnoresNonDolt(t *testing.T) {
 	}
 }
 
+func TestDiscoverDoltProcessesFromPSSkipsPortScanWithoutDoltProcesses(t *testing.T) {
+	called := false
+	procs := discoverDoltProcessesFromPSLines([]string{
+		"12345 1024 Sun May 17 09:31:24 2026 /usr/bin/worker --config /tmp/TestX/config.yaml",
+	}, func() map[int][]int {
+		called = true
+		return map[int][]int{}
+	})
+	if called {
+		t.Fatal("discoverDoltProcessesFromPSLines called port scanner without a Dolt process")
+	}
+	if len(procs) != 0 {
+		t.Fatalf("discoverDoltProcessesFromPSLines = %#v, want no Dolt processes", procs)
+	}
+}
+
+func TestDiscoverDoltProcessesFromPSLinesScansPortsForDoltProcesses(t *testing.T) {
+	called := false
+	procs := discoverDoltProcessesFromPSLines([]string{
+		"12345 1024 Sun May 17 09:31:24 2026 /usr/bin/dolt sql-server --config /tmp/TestX/config.yaml",
+	}, func() map[int][]int {
+		called = true
+		return map[int][]int{12345: {3307}}
+	})
+	if !called {
+		t.Fatal("discoverDoltProcessesFromPSLines skipped port scanner for a Dolt process")
+	}
+	if len(procs) != 1 || procs[0].PID != 12345 {
+		t.Fatalf("discoverDoltProcessesFromPSLines = %#v, want one Dolt process", procs)
+	}
+	if !reflect.DeepEqual(procs[0].Ports, []int{3307}) {
+		t.Fatalf("Dolt process ports = %v, want [3307]", procs[0].Ports)
+	}
+}
+
 func TestParseListeningPortsByPIDFromLsof(t *testing.T) {
 	output := `COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
 dolt    78306 dbox   11u  IPv4 0x0000000000000000      0t0  TCP 127.0.0.1:3306 (LISTEN)

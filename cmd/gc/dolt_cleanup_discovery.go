@@ -94,19 +94,33 @@ func discoverDoltProcessesFromPS() ([]DoltProcInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	pidPorts := portsByPID()
+	return discoverDoltProcessesFromPSLines(lines, portsByPID), nil
+}
+
+func discoverDoltProcessesFromPSLines(lines []string, portsFn func() map[int][]int) []DoltProcInfo {
 	var out []DoltProcInfo
 	for _, line := range lines {
-		proc, ok := parseDoltPSLine(line, pidPorts)
+		proc, ok := parseDoltPSLine(line, nil)
 		if !ok {
 			continue
 		}
-		// No /proc on this host, so CWDState stays unknown (protect-leaning),
-		// but the --config path can still be checked on disk.
+		// No /proc is available on this path, so CWDState stays unknown
+		// (protect-leaning), but the --config path can still be checked on disk.
 		proc.ConfigPathState = doltConfigPathState(proc.Argv)
 		out = append(out, proc)
 	}
-	return out, nil
+	if len(out) == 0 {
+		return nil
+	}
+
+	// Resolving every listening port requires a full lsof scan on hosts without
+	// /proc. Defer that scan until ps has found a Dolt process; cleanup and leak
+	// guard callers otherwise pay the lsof timeout on every empty test scan.
+	pidPorts := portsFn()
+	for i := range out {
+		out[i].Ports = pidPorts[out[i].PID]
+	}
+	return out
 }
 
 // cwdStateFromLink classifies a /proc/<pid>/cwd readlink target, given the
