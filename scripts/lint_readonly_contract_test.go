@@ -59,6 +59,32 @@ func TestLintUsesReadonlyModuleDownloads(t *testing.T) {
 	}
 }
 
+func TestLintExcludesNodeModules(t *testing.T) {
+	configPath := filepath.Join(repoRoot(t), ".golangci.yml")
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", configPath, err)
+	}
+
+	var config struct {
+		Linters struct {
+			Exclusions struct {
+				Paths []string `yaml:"paths"`
+			} `yaml:"exclusions"`
+		} `yaml:"linters"`
+	}
+	if err := yaml.Unmarshal(body, &config); err != nil {
+		t.Fatalf("parse %s: %v", configPath, err)
+	}
+
+	for _, path := range config.Linters.Exclusions.Paths {
+		if path == "node_modules" || path == "node_modules/" || path == "node_modules$" {
+			return
+		}
+	}
+	t.Fatalf("linters.exclusions.paths = %v, want a node_modules exclusion", config.Linters.Exclusions.Paths)
+}
+
 func TestQualityGateTargetsUseReadonlyModuleDownloads(t *testing.T) {
 	makefile, err := os.ReadFile(filepath.Join(repoRoot(t), "Makefile"))
 	if err != nil {
