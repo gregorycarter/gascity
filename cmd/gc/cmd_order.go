@@ -1063,6 +1063,13 @@ func doOrderCheck(aa []orders.Order, now time.Time, lastRunFn orders.LastRunFunc
 	return doOrderCheckJSON(aa, now, lastRunFn, false, stdout, io.Discard)
 }
 
+func orderCheckReason(a orders.Order, reason string, due bool) string {
+	if a.Trigger == "cron" && due {
+		return reason + " (dispatch pending)"
+	}
+	return reason
+}
+
 type orderCheckJSON struct {
 	SchemaVersion string              `json:"schema_version"`
 	OK            bool                `json:"ok"`
@@ -1189,16 +1196,7 @@ func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City,
 		return 1
 	}
 
-	var firedEvents []events.Event
-	if ep != nil {
-		firedEvents, _ = ep.List(events.Filter{Type: events.OrderFired})
-	}
-	latestFired := make(map[string]time.Time)
-	for _, event := range firedEvents {
-		if event.Ts.After(latestFired[event.Subject]) {
-			latestFired[event.Subject] = event.Ts
-		}
-	}
+	latestFired, firedHistoryAvailable := latestOrderFiredTimes(ep)
 
 	if jsonOutput {
 		result := orderCheckJSON{
@@ -1221,6 +1219,9 @@ func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City,
 			baseLastRunFn := orders.LastRunAcross(frontDoors)
 			var lastRunErr error
 			lastRunFn := func(orderName string) (time.Time, error) {
+				if a.Trigger == "cron" && firedHistoryAvailable {
+					return latestFired[orderName], nil
+				}
 				if t, ok := latestFired[orderName]; ok && !t.IsZero() {
 					if a.Trigger == "cooldown" {
 						if interval, err := time.ParseDuration(a.Interval); err == nil && interval > 0 {
@@ -1267,7 +1268,7 @@ func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City,
 				ScopedName: a.ScopedName(),
 				Trigger:    a.Trigger,
 				Due:        check.Due,
-				Reason:     check.Reason,
+				Reason:     orderCheckReason(a, check.Reason, check.Due),
 			})
 		}
 		if writeCLIJSONLineOrExit(stdout, stderr, "gc order check", result) != 0 {
@@ -1300,6 +1301,9 @@ func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City,
 		baseLastRunFn := orders.LastRunAcross(frontDoors)
 		var lastRunErr error
 		lastRunFn := func(orderName string) (time.Time, error) {
+			if a.Trigger == "cron" && firedHistoryAvailable {
+				return latestFired[orderName], nil
+			}
 			if t, ok := latestFired[orderName]; ok && !t.IsZero() {
 				if a.Trigger == "cooldown" {
 					if interval, err := time.ParseDuration(a.Interval); err == nil && interval > 0 {
@@ -1346,9 +1350,9 @@ func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City,
 			if rig == "" {
 				rig = "-"
 			}
-			fmt.Fprintf(stdout, "%-20s %-12s %-15s %-5s %s\n", a.Name, a.Trigger, rig, due, result.Reason) //nolint:errcheck
+			fmt.Fprintf(stdout, "%-20s %-12s %-15s %-5s %s\n", a.Name, a.Trigger, rig, due, orderCheckReason(a, result.Reason, result.Due)) //nolint:errcheck
 		} else {
-			fmt.Fprintf(stdout, "%-20s %-12s %-5s %s\n", a.Name, a.Trigger, due, result.Reason) //nolint:errcheck
+			fmt.Fprintf(stdout, "%-20s %-12s %-5s %s\n", a.Name, a.Trigger, due, orderCheckReason(a, result.Reason, result.Due)) //nolint:errcheck
 		}
 	}
 

@@ -662,6 +662,45 @@ func TestOrderCheck(t *testing.T) {
 	}
 }
 
+func TestOrderCheckCronReportsPendingCatchUpAfterFailedAttempt(t *testing.T) {
+	store := &createdAtOverrideStore{Store: beads.NewMemStore()}
+	lastSuccessfulFire := time.Date(2026, 8, 20, 4, 0, 0, 0, time.UTC)
+	currentSlot := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	now := currentSlot.Add(time.Minute)
+	failed, err := store.Create(beads.Bead{
+		Title:     "order:cron",
+		Labels:    []string{"order-run:cron", labelOrderTracking, "exec-failed"},
+		CreatedAt: currentSlot,
+	})
+	if err != nil {
+		t.Fatalf("create failed tracking bead: %v", err)
+	}
+	if err := store.Close(failed.ID); err != nil {
+		t.Fatalf("close failed tracking bead: %v", err)
+	}
+
+	ep := events.NewFake()
+	ep.Record(events.Event{Type: events.OrderFired, Subject: "cron", Ts: lastSuccessfulFire})
+	aa := []orders.Order{{
+		Name:     "cron",
+		Trigger:  "cron",
+		Schedule: "0 */4 * * *",
+		Exec:     "true",
+	}}
+	resolver := func(orders.Order) ([]beads.OrdersStore, error) {
+		return []beads.OrdersStore{{Store: store}}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doOrderCheckWithStoresResolverScoped(t.TempDir(), &config.City{}, aa, now, ep, resolver, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doOrderCheckWithStoresResolverScoped = %d, want 0 (catch-up due); stdout: %s; stderr: %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "dispatch pending") {
+		t.Fatalf("stdout = %q, want explicit pending-dispatch status", stdout.String())
+	}
+}
+
 func TestOrderCheckWithStoresResolverRejectsReservedOrderEnvKey(t *testing.T) {
 	aa := []orders.Order{
 		{

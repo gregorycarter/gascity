@@ -494,6 +494,7 @@ func (m *memoryOrderDispatcher) dispatch(ctx context.Context, cityPath string, n
 		}()
 	}()
 	trackingIndex := newOrderDispatchTrackingIndex()
+	latestFired, firedHistoryAvailable := latestOrderFiredTimes(m.ep)
 	budgetSpent := 0
 
 	total := len(m.aa)
@@ -578,6 +579,12 @@ func (m *memoryOrderDispatcher) dispatch(ctx context.Context, cityPath string, n
 		var lastRunErr error
 		var lastRunFromCache bool
 		lastRunFn := func(orderName string) (time.Time, error) {
+			if a.Trigger == "cron" && firedHistoryAvailable {
+				if fired := latestFired[orderName]; !fired.IsZero() {
+					return fired, nil
+				}
+				return time.Time{}, nil
+			}
 			last, fromCache, err := m.cachedLastRun(orderName, storeKeysForGate, baseLastRunFn)
 			if err != nil {
 				lastRunErr = err
@@ -1162,6 +1169,27 @@ func orderHistoryCacheKey(orderName string, storeKeys []string) string {
 
 func orderTriggerUsesLastRun(a orders.Order) bool {
 	return a.Trigger == "cooldown" || a.Trigger == "cron"
+}
+
+// latestOrderFiredTimes returns the most recent accepted dispatch timestamp by
+// scoped order name. Tracking beads are created before dispatchOne records an
+// order.fired event, so they cannot be used as the cron clock: a failed or
+// canceled attempt would otherwise consume the scheduled occurrence.
+func latestOrderFiredTimes(ep events.Provider) (map[string]time.Time, bool) {
+	latest := make(map[string]time.Time)
+	if ep == nil {
+		return latest, false
+	}
+	fired, err := ep.List(events.Filter{Type: events.OrderFired})
+	if err != nil {
+		return latest, false
+	}
+	for _, event := range fired {
+		if event.Ts.After(latest[event.Subject]) {
+			latest[event.Subject] = event.Ts
+		}
+	}
+	return latest, true
 }
 
 // dispatchOne runs a single order dispatch in its own goroutine.

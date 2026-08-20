@@ -742,6 +742,59 @@ func TestOrderDispatchEventExecFailureAdvancesCursor(t *testing.T) {
 	}
 }
 
+func TestOrderDispatchCronRetriesSlotWithoutSuccessfulFire(t *testing.T) {
+	store := &createdAtOverrideStore{Store: beads.NewMemStore()}
+	eventLog := events.NewFake()
+	lastSuccessfulFire := time.Date(2026, 8, 20, 4, 0, 0, 0, time.UTC)
+	currentSlot := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	now := currentSlot.Add(time.Minute)
+
+	// A failed attempt creates a closed tracking bead at the scheduled slot,
+	// but it must not consume that slot unless the dispatcher recorded a fire.
+	failed, err := store.Create(beads.Bead{
+		Title:     "order:cron",
+		Labels:    []string{"order-run:cron", labelOrderTracking, "exec-failed"},
+		CreatedAt: currentSlot,
+	})
+	if err != nil {
+		t.Fatalf("create failed tracking bead: %v", err)
+	}
+	if err := store.Close(failed.ID); err != nil {
+		t.Fatalf("close failed tracking bead: %v", err)
+	}
+	eventLog.Record(events.Event{
+		Type:    events.OrderFired,
+		Subject: "cron",
+		Ts:      lastSuccessfulFire,
+	})
+
+	ad := buildOrderDispatcherFromListExec([]orders.Order{{
+		Name:     "cron",
+		Trigger:  "cron",
+		Schedule: "0 */4 * * *",
+		Exec:     "true",
+	}}, store, eventLog, successfulExec, eventLog)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	ad.dispatch(context.Background(), t.TempDir(), now)
+	ad.drain(context.Background())
+
+	fired := 0
+	for _, event := range eventLog.Events {
+		if event.Type == events.OrderFired && event.Subject == "cron" {
+			fired++
+		}
+	}
+	if fired != 2 {
+		t.Fatalf("successful cron dispatch count = %d, want prior fire plus retry; events: %#v", fired, eventLog.Events)
+	}
+	if runs := trackingBeads(t, store, "order-run:cron"); len(runs) != 2 {
+		t.Fatalf("cron tracking beads = %d, want failed attempt plus retry", len(runs))
+	}
+}
+
 func TestOrderDispatchEventExecLatestSeqErrorDoesNotRunExec(t *testing.T) {
 	store := beads.NewMemStore()
 	tracking, err := store.Create(beads.Bead{
