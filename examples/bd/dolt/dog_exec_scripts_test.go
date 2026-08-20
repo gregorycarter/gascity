@@ -3686,10 +3686,9 @@ func TestCompactScriptExistingQuarantineMarkerAlertsOnceAcrossRepeatedCycles(t *
 		t.Fatalf("third compact succeeded despite quarantine:\n%s", thirdOut)
 	}
 
-	// Two consecutive compact runs over an unchanged quarantine condition
-	// must send exactly one operator mail — a stable, correct quarantine
-	// should not page forever. The event stays unconditional (one per
-	// cycle) so downstream automation can still observe every check.
+	// Consecutive checks within the alert cadence should not page forever. The
+	// event stays unconditional so downstream automation can observe every
+	// check.
 	log := readCompactGCLog(t, fixture)
 	mailLines := compactGCLogLinesWithPrefix(log, "gc mail send ")
 	if len(mailLines) != 1 {
@@ -3698,6 +3697,33 @@ func TestCompactScriptExistingQuarantineMarkerAlertsOnceAcrossRepeatedCycles(t *
 	eventLines := compactGCLogLinesWithPrefix(log, "gc event emit dolt.compact.quarantine")
 	if len(eventLines) != 3 {
 		t.Fatalf("each compact cycle should still emit a dolt.compact.quarantine event even when the mail is suppressed, got %d\nlog:\n%s", len(eventLines), log)
+	}
+}
+
+func TestCompactScriptExistingQuarantineMarkerReAlertsAfterCadence(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	firstOut, err := fixture.run(t, "row_count_decreases", "GC_DOLT_COMPACT_THRESHOLD_COMMITS=500")
+	if err == nil {
+		t.Fatalf("first compact succeeded despite row-count decrease:\n%s", firstOut)
+	}
+
+	marker := filepath.Join(fixture.cityPath, ".gc", "runtime", "packs", "dolt", "compact-quarantine", "beads")
+	// Simulate the quarantined database having been silent since a prior day.
+	replaceCompactMarkerField(t, marker, "last_notified_ts", "2026-05-01T00:00:00Z")
+	secondOut, err := fixture.run(t, "below_threshold")
+	if err == nil {
+		t.Fatalf("second compact succeeded despite quarantine:\n%s", secondOut)
+	}
+
+	log := readCompactGCLog(t, fixture)
+	if mailLines := compactGCLogLinesWithPrefix(log, "gc mail send "); len(mailLines) != 2 {
+		t.Fatalf("a quarantine unchanged for more than a day should re-alert, want 2 mails, got %d\nlog:\n%s", len(mailLines), log)
+	}
+	if seen := compactMarkerValue(t, marker, "seen_count"); seen != "2" {
+		t.Fatalf("re-alert should preserve the observation count, got seen_count=%q", seen)
+	}
+	if notified := compactMarkerValue(t, marker, "notify_count"); notified != "2" {
+		t.Fatalf("re-alert should increment notification count, got notify_count=%q", notified)
 	}
 }
 
@@ -3727,7 +3753,8 @@ func TestCompactScriptQuarantineMailFailureIsRetriedNextCycle(t *testing.T) {
 		t.Fatalf("a failed quarantine mail must be retried on the next cycle, want 2 attempts, got %d\nlog:\n%s", len(mailLines), log)
 	}
 
-	// Once a send finally succeeds, dedup takes over again.
+	// Once a send finally succeeds, deduplication takes over again until the
+	// daily repeat-alert cadence elapses.
 	thirdOut, err := fixture.run(t, "below_threshold")
 	if err == nil {
 		t.Fatalf("third compact succeeded despite quarantine:\n%s", thirdOut)

@@ -310,6 +310,7 @@ bare_gc_input="${GC_DOLT_COMPACT_BARE_GC:-}"
 skip_fetch_input="${GC_DOLT_COMPACT_SKIP_FETCH:-}"
 skip_fetch_dbs="${GC_DOLT_COMPACT_SKIP_FETCH_DBS:-}"
 compact_alert_to="${GC_DOLT_COMPACT_ALERT_TO:-mayor}"
+compact_repeat_alert_interval_secs=86400
 case "$bare_gc_input" in
   ''|0|false|FALSE|no|NO)
     bare_gc=0
@@ -1099,6 +1100,12 @@ preflight_counts() {
 verify_counts() {
   db="$1"
   preflight="$2"
+  # Read table counts and hashes from the flatten's own commit when the caller
+  # supplies one. Probing live HEAD lets a concurrent UPDATE look like
+  # compaction corruption: the row count stays the same while the value hash
+  # changes. A revision-qualified database makes this comparison deterministic
+  # and keeps concurrent writers out of the integrity decision.
+  verify_db="${3:-$1}"
   fail=0
   verify_counts_saw_gain=0
   verify_counts_saw_gain_hash_drift=0
@@ -1119,7 +1126,7 @@ verify_counts() {
     rest=${line#* }
     expected=${rest%% *}
     expected_hash=${rest#* }
-    if ! actual=$(row_count "$db" "$t"); then
+    if ! actual=$(row_count "$verify_db" "$t"); then
       printf 'compact: db=%s post-flatten row count failed for table=%s\n' "$db" "$t" >&2
       verify_counts_saw_probe_failure=1
       if [ "$fail" -eq 0 ]; then
@@ -1141,7 +1148,7 @@ verify_counts() {
         continue
         ;;
     esac
-    if ! actual_hash=$(table_value_hash "$db" "$t"); then
+    if ! actual_hash=$(table_value_hash "$verify_db" "$t"); then
       printf 'compact: db=%s post-flatten table value hash failed for table=%s\n' "$db" "$t" >&2
       verify_counts_saw_probe_failure=1
       if [ "$fail" -eq 0 ]; then
@@ -1475,12 +1482,10 @@ send_compact_quarantine_alert() {
 }
 
 # quarantine_should_notify DB REASON
-#   Fail-open dedup check: EMIT (return 0) unless the quarantine marker's
-#   last_notified_reason already matches REASON, meaning a mail already went
-#   out for this exact quarantine state. A missing marker, missing field, or
-#   unreadable marker always emits — this must never wrongly suppress a real
-#   alert. Mirrors the notify-once-per-distinct-state marker shape in
-#   gc-management's packs/maintainer-pr-review/scripts/hold-notice-lib.sh.
+#   Emit the first alert and alerts for changed reasons immediately. For an
+#   unchanged reason, re-alert once the daily cadence elapses. This retains the
+#   protection against an alert storm while ensuring a quarantine that blocks
+#   compaction for days cannot remain silent after its first notification.
 quarantine_should_notify() {
   db="$1"
   reason="$2"
@@ -1488,8 +1493,16 @@ quarantine_should_notify() {
   [ -f "$_qn_marker" ] && [ -r "$_qn_marker" ] || return 0
   _qn_prev_reason=$(compact_marker_value "$quarantine_dir" "$db" last_notified_reason || true)
   [ -n "$_qn_prev_reason" ] || return 0
-  [ "$_qn_prev_reason" = "$reason" ] && return 1
-  return 0
+  [ "$_qn_prev_reason" != "$reason" ] && return 0
+
+  _qn_last_ts=$(compact_marker_value "$quarantine_dir" "$db" last_notified_ts || true)
+  [ -n "$_qn_last_ts" ] || return 0
+  _qn_last_epoch=$(date -u -d "$_qn_last_ts" +%s 2>/dev/null || \
+    date -ju -f "%Y-%m-%dT%H:%M:%SZ" "$_qn_last_ts" +%s 2>/dev/null || true)
+  [ -n "$_qn_last_epoch" ] || return 0
+  _qn_age=$(( $(date -u +%s) - _qn_last_epoch ))
+  [ "$_qn_age" -ge "$compact_repeat_alert_interval_secs" ] && return 0
+  return 1
 }
 
 # record_quarantine_notify_state DB REASON EMITTED
@@ -2542,7 +2555,9 @@ flatten_database() {
   fi
 
   verify_counts_rc=0
-  verify_counts "$db" "$preflight_tmp" || verify_counts_rc=$?
+  # Pin post-flatten table probes to the flatten commit. Writers that commit
+  # after flattening must not be mistaken for data loss during verification.
+  verify_counts "$db" "$preflight_tmp" "$db/$flatten_head" || verify_counts_rc=$?
 
   # Writer-race gate (local-verify HEAD-stability). A normal MVCC writer (the
   # beads/mail workload) can commit to this db inside the flatten window, which
@@ -3118,5 +3133,9 @@ main() {
   fi
   exit 0
 }
+
+if [ "${COMPACT_LIB_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 main "$@"
