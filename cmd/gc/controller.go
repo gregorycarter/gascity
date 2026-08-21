@@ -1030,10 +1030,11 @@ func gracefulStopAll(
 	store beads.SessionStore,
 	stdout, stderr io.Writer,
 ) {
-	gracefulStopAllWithForceSignal(names, sp, timeout, rec, cfg, store, stdout, stderr, nil)
+	gracefulStopAllWithForceSignal("", names, sp, timeout, rec, cfg, store, stdout, stderr, nil)
 }
 
 func gracefulStopAllWithForceSignal(
+	cityPath string,
 	names []string,
 	sp runtime.Provider,
 	timeout time.Duration,
@@ -1045,7 +1046,7 @@ func gracefulStopAllWithForceSignal(
 ) {
 	if timeout <= 0 || len(names) == 0 || stopForceRequested(forceStopRequested) {
 		// Immediate kill (no grace period).
-		stopTargetsBounded(stopTargetsForNames(names, cfg, store.Store, stderr), cfg, store.Store, sp, rec, "gc", stdout, stderr)
+		stopTargetsBoundedWithCityPath(cityPath, stopTargetsForNames(names, cfg, store.Store, stderr), cfg, store.Store, sp, rec, "gc", stdout, stderr)
 		return
 	}
 	targets := stopTargetsForNames(names, cfg, store.Store, stderr)
@@ -1060,7 +1061,7 @@ func gracefulStopAllWithForceSignal(
 	// The configured timeout is the post-dispatch grace window; dispatch
 	// latency is intentionally outside that budget so every interrupted
 	// session still gets the full graceful-exit wait once nudged.
-	sent := interruptTargetsBoundedWithForceSignal(targets, cfg, store.Store, sp, stderr, forceStopRequested)
+	sent := interruptTargetsBoundedWithForceSignal(cityPath, targets, cfg, store.Store, sp, stderr, forceStopRequested)
 	fmt.Fprintf(stdout, "Sent interrupt to %d/%d agent(s), waiting %s...\n", //nolint:errcheck // best-effort stdout
 		sent, len(names), timeout)
 
@@ -1145,7 +1146,7 @@ func gracefulStopAllWithForceSignal(
 		}
 		survivors = append(survivors, name)
 	}
-	stopTargetsBounded(filterStopTargets(targets, survivors), cfg, store.Store, sp, rec, "gc", stdout, stderr)
+	stopTargetsBoundedWithCityPath(cityPath, filterStopTargets(targets, survivors), cfg, store.Store, sp, rec, "gc", stdout, stderr)
 }
 
 func stopForceRequested(forceStopRequested func() bool) bool {

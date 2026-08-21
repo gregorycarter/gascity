@@ -7452,7 +7452,7 @@ func TestStopTargetThroughWorkerBoundary_CityStopLeavesSessionAsleep(t *testing.
 		t.Fatalf("Start: %v", err)
 	}
 
-	err = stopTargetThroughWorkerBoundary(stopTarget{
+	err = stopTargetThroughWorkerBoundary("", stopTarget{
 		sessionID: session.ID,
 		name:      "control-dispatcher",
 		resolved:  true,

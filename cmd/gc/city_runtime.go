@@ -2091,7 +2091,7 @@ func (cr *CityRuntime) reloadConfigTraced(
 		if len(running) > 0 {
 			fmt.Fprintf(cr.stdout, "Provider changed (%s), stopping %d agent(s)...\n", //nolint:errcheck
 				providerSwapSummary, len(running))
-			gracefulStopAll(running, cr.sp, nextCfg.Daemon.ShutdownTimeoutDuration(), cr.rec, cr.cfg, cr.sessionsBeadStore(), cr.stdout, cr.stderr)
+			gracefulStopAllWithForceSignal(cr.cityPath, running, cr.sp, nextCfg.Daemon.ShutdownTimeoutDuration(), cr.rec, cr.cfg, cr.sessionsBeadStore(), cr.stdout, cr.stderr, nil)
 		}
 		cr.rec.Record(events.Event{
 			Type:    events.ProviderSwapped,
@@ -3860,7 +3860,7 @@ func (cr *CityRuntime) shutdown() {
 		sweepEnumerated := listErr == nil
 		store := cr.sessionsBeadStore()
 		markCityStopSessionSleepReason(sessionFrontDoor(store.Store), cr.stderr)
-		gracefulStopAllWithForceSignal(running, cr.sp, gracefulTimeout, cr.rec, cr.cfg, store, cr.stdout, cr.stderr, cr.forceStopRequested)
+		gracefulStopAllWithForceSignal(cr.cityPath, running, cr.sp, gracefulTimeout, cr.rec, cr.cfg, store, cr.stdout, cr.stderr, cr.forceStopRequested)
 		if !asyncStartsDrained && cr.forceStopRequested() {
 			lateRunning, lateListErr := cr.sp.ListRunning("")
 			if lateListErr != nil {
@@ -3873,7 +3873,7 @@ func (cr *CityRuntime) shutdown() {
 			}
 			if len(lateRunning) > 0 {
 				markCityStopSessionSleepReason(sessionFrontDoor(store.Store), cr.stderr)
-				gracefulStopAllWithForceSignal(lateRunning, cr.sp, 0, cr.rec, cr.cfg, store, cr.stdout, cr.stderr, cr.forceStopRequested)
+				gracefulStopAllWithForceSignal(cr.cityPath, lateRunning, cr.sp, 0, cr.rec, cr.cfg, store, cr.stdout, cr.stderr, cr.forceStopRequested)
 			}
 		}
 		// With every enumerated session stopped, tear down the provider's

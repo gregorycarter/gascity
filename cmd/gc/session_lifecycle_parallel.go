@@ -3293,19 +3293,19 @@ func hydrateStopTargets(targets []stopTarget, cfg *config.City, store beads.Stor
 	return merged
 }
 
-func stopTargetThroughWorkerBoundary(target stopTarget, store beads.Store, sp runtime.Provider, cfg *config.City) error {
+func stopTargetThroughWorkerBoundary(cityPath string, target stopTarget, store beads.Store, sp runtime.Provider, cfg *config.City) error {
 	targetID := strings.TrimSpace(target.sessionID)
 	if targetID == "" {
 		targetID = strings.TrimSpace(target.name)
 	}
 	if cityStopSessionMarked(store, target.sessionID) {
-		if err := workerKillSessionTargetWithConfig("", store, sp, cfg, targetID); err != nil {
+		if err := workerKillSessionTargetWithConfig(cityPath, store, sp, cfg, targetID); err != nil {
 			return err
 		}
 		markCityStopSessionAsAsleep(sessionFrontDoor(store), target.sessionID, nil)
 		return nil
 	}
-	return workerStopSessionTargetWithConfig("", store, sp, cfg, targetID)
+	return workerStopSessionTargetWithConfig(cityPath, store, sp, cfg, targetID)
 }
 
 func cityStopSessionMarked(store beads.Store, sessionID string) bool {
@@ -3344,10 +3344,10 @@ func interruptPerTargetTimeout(cfg *config.City) time.Duration {
 }
 
 func interruptTargetsBounded(targets []stopTarget, cfg *config.City, store beads.Store, sp runtime.Provider, stderr io.Writer) int {
-	return interruptTargetsBoundedWithForceSignal(targets, cfg, store, sp, stderr, nil)
+	return interruptTargetsBoundedWithForceSignal("", targets, cfg, store, sp, stderr, nil)
 }
 
-func interruptTargetsBoundedWithForceSignal(targets []stopTarget, cfg *config.City, store beads.Store, sp runtime.Provider, stderr io.Writer, shouldStop func() bool) int {
+func interruptTargetsBoundedWithForceSignal(cityPath string, targets []stopTarget, cfg *config.City, store beads.Store, sp runtime.Provider, stderr io.Writer, shouldStop func() bool) int {
 	targets = hydrateStopTargets(targets, cfg, store, stderr)
 	// Pool-managed sessions have no human user, so Claude Code's
 	// interactive "What should Claude do instead?" prompt would hang
@@ -3366,7 +3366,7 @@ func interruptTargetsBoundedWithForceSignal(targets []stopTarget, cfg *config.Ci
 	if len(poolManaged) > 0 {
 		waveStarted := time.Now()
 		results := executeTargetWave(poolManaged, defaultMaxParallelStopsPerWave, stopPerTargetTimeoutDefault, func(target stopTarget) error {
-			return stopTargetThroughWorkerBoundary(target, store, sp, cfg)
+			return stopTargetThroughWorkerBoundary(cityPath, target, store, sp, cfg)
 		})
 		for _, result := range results {
 			outcome := result.outcome
@@ -3388,7 +3388,7 @@ func interruptTargetsBoundedWithForceSignal(targets []stopTarget, cfg *config.Ci
 		if targetID == "" {
 			targetID = strings.TrimSpace(target.name)
 		}
-		return workerInterruptSessionTargetWithConfig("", store, sp, cfg, targetID)
+		return workerInterruptSessionTargetWithConfig(cityPath, store, sp, cfg, targetID)
 	})
 	for _, result := range results {
 		logLifecycleOutcome(stderr, "interrupt", 0, result.target.name, result.target.template, result.outcome, result.started, result.finished, result.err)
@@ -3413,6 +3413,19 @@ func stopTargetsBounded(
 	actor string,
 	stdout, stderr io.Writer,
 ) int {
+	return stopTargetsBoundedWithCityPath("", targets, cfg, store, sp, rec, actor, stdout, stderr)
+}
+
+func stopTargetsBoundedWithCityPath(
+	cityPath string,
+	targets []stopTarget,
+	cfg *config.City,
+	store beads.Store,
+	sp runtime.Provider,
+	rec events.Recorder,
+	actor string,
+	stdout, stderr io.Writer,
+) int {
 	targets = hydrateStopTargets(targets, cfg, store, stderr)
 	for _, target := range targets {
 		if !target.resolved {
@@ -3423,7 +3436,7 @@ func stopTargetsBounded(
 			for wave, target := range targets {
 				waveStarted := time.Now()
 				results := executeTargetWave([]stopTarget{target}, 1, stopPerTargetTimeoutDefault, func(target stopTarget) error {
-					return stopTargetThroughWorkerBoundary(target, store, sp, cfg)
+					return stopTargetThroughWorkerBoundary(cityPath, target, store, sp, cfg)
 				})
 				for _, result := range results {
 					if shouldLogStopOutcome(result.target, cfg) {
@@ -3468,7 +3481,7 @@ func stopTargetsBounded(
 			}
 		}
 		results := executeTargetWave(waveTargets, defaultMaxParallelStopsPerWave, stopPerTargetTimeoutDefault, func(target stopTarget) error {
-			return stopTargetThroughWorkerBoundary(target, store, sp, cfg)
+			return stopTargetThroughWorkerBoundary(cityPath, target, store, sp, cfg)
 		})
 		for _, result := range results {
 			if shouldLogStopOutcome(result.target, cfg) {

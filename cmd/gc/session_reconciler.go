@@ -2608,7 +2608,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					continue
 				}
 				if runtimeRunning {
-					if err := workerKillSessionTargetWithConfig("", store, sp, cfg, name); err != nil {
+					if err := workerKillSessionTargetWithConfig(cityPath, store, sp, cfg, name); err != nil {
 						fmt.Fprintf(stderr, "session reconciler: stopping restart-requested %s: %v\n", name, err) //nolint:errcheck
 						continue
 					}
@@ -2948,7 +2948,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 							// write-returns-Info). The alive lane falls through to the
 							// aggregating refresh @~2710 today, but folding here future-proofs
 							// that refresh's retirement (STEP6-PREPASS-AUDIT group 10).
-							tick.apply(id, resetConfiguredNamedSessionForConfigDriftInfo(infoByID[id], store, sp, name, alive, string(sessionpkg.StateStartPending), clk.Now().UTC(), stderr))
+							tick.apply(id, resetConfiguredNamedSessionForConfigDriftInfoAtPath(cityPath, infoByID[id], store, sp, name, alive, string(sessionpkg.StateStartPending), clk.Now().UTC(), stderr))
 							if trace != nil {
 								trace.RecordDecision(TraceSiteReconcilerConfigDrift, TraceReasonConfigDrift, TraceOutcomeRestartInPlace, tp.TemplateName, name, configDriftTracePayload(storedHash, currentHash, driftedFields, nil))
 							}
@@ -3168,7 +3168,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 						// write-returns-Info); this asleep lane `continue`s, so the fold must
 						// run before the continue. Clears restart_requested on the snapshot
 						// (#2574). Pre-pass-masked (STEP6-PREPASS-AUDIT group 10).
-						tick.apply(id, resetConfiguredNamedSessionForConfigDriftInfo(infoByID[id], store, sp, name, false, "asleep", clk.Now().UTC(), stderr))
+						tick.apply(id, resetConfiguredNamedSessionForConfigDriftInfoAtPath(cityPath, infoByID[id], store, sp, name, false, "asleep", clk.Now().UTC(), stderr))
 						if trace != nil {
 							trace.RecordDecision(TraceSiteReconcilerConfigDrift, TraceReasonConfigDrift, TraceOutcomeRepairInPlace, tp.TemplateName, name, configDriftTracePayload(storedHash, currentHash, driftedFields, nil))
 						}
@@ -3235,7 +3235,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					reason, outcome := timerTraceCodes(dec)
 					trace.RecordDecision(TraceSiteReconcilerMaxSessionAge, reason, outcome, tp.TemplateName, name, nil)
 				}
-				if err := workerKillSessionTargetWithConfig("", store, sp, cfg, name); err != nil {
+				if err := workerKillSessionTargetWithConfig(cityPath, store, sp, cfg, name); err != nil {
 					fmt.Fprintf(stderr, "session reconciler: stopping aged %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
 				} else {
 					_ = sp.ClearScrollback(name)
@@ -3357,7 +3357,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					reason, outcome := timerTraceCodes(dec)
 					trace.RecordDecision(TraceSiteReconcilerIdleTimeout, reason, outcome, tp.TemplateName, name, nil)
 				}
-				if err := workerKillSessionTargetWithConfig("", store, sp, cfg, name); err != nil {
+				if err := workerKillSessionTargetWithConfig(cityPath, store, sp, cfg, name); err != nil {
 					fmt.Fprintf(stderr, "session reconciler: stopping idle %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
 				} else {
 					_ = sp.ClearScrollback(name)
@@ -5354,6 +5354,20 @@ func resetConfiguredNamedSessionForConfigDriftInfo(
 	now time.Time,
 	stderr io.Writer,
 ) map[string]string {
+	return resetConfiguredNamedSessionForConfigDriftInfoAtPath("", info, store, sp, sessionName, alive, nextState, now, stderr)
+}
+
+func resetConfiguredNamedSessionForConfigDriftInfoAtPath(
+	cityPath string,
+	info sessionpkg.Info,
+	store beads.Store,
+	sp runtime.Provider,
+	sessionName string,
+	alive bool,
+	nextState string,
+	now time.Time,
+	stderr io.Writer,
+) map[string]string {
 	if store == nil {
 		return nil
 	}
@@ -5361,7 +5375,7 @@ func resetConfiguredNamedSessionForConfigDriftInfo(
 		nextState = "asleep"
 	}
 	if alive && sp != nil && sessionName != "" {
-		if err := workerKillSessionTargetWithConfig("", store, sp, nil, sessionName); err != nil {
+		if err := workerKillSessionTargetWithConfig(cityPath, store, sp, nil, sessionName); err != nil {
 			fmt.Fprintf(stderr, "session reconciler: stopping config-drift named session %s: %v\n", sessionName, err) //nolint:errcheck
 		}
 	}

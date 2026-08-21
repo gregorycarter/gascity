@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -43,6 +44,39 @@ func TestStopTargetsBoundedUsesWorkerBoundaryForKnownSession(t *testing.T) {
 	}
 	if got.State != sessionpkg.StateSuspended {
 		t.Fatalf("state = %q, want %q", got.State, sessionpkg.StateSuspended)
+	}
+}
+
+func TestStopTargetThroughWorkerBoundaryRecordsOperationForCity(t *testing.T) {
+	t.Setenv("GC_EVENTS", "")
+	cityPath := t.TempDir()
+	store := beads.NewMemStore()
+	sp := runtime.NewFake()
+	mgr := newSessionManagerWithConfig("", store, sp, nil)
+	info, err := mgr.CreateSession(context.Background(), sessionpkg.CreateOptions{
+		Template: "worker", Title: "Worker", Command: "claude", WorkDir: t.TempDir(), Provider: "claude",
+		Env: nil, Resume: sessionpkg.ProviderResume{}, Hints: runtime.Config{}, ExtraMeta: map[string]string{"session_origin": "manual"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	err = stopTargetThroughWorkerBoundary(cityPath, stopTarget{
+		sessionID: info.ID,
+		name:      info.SessionName,
+		template:  "worker",
+		resolved:  true,
+	}, store, sp, &config.City{})
+	if err != nil {
+		t.Fatalf("stopTargetThroughWorkerBoundary: %v", err)
+	}
+
+	got, err := events.ReadFiltered(filepath.Join(cityPath, ".gc", "events.jsonl"), events.Filter{Type: events.WorkerOperation})
+	if err != nil {
+		t.Fatalf("reading worker.operation events: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("stop boundary did not record a worker.operation event")
 	}
 }
 
