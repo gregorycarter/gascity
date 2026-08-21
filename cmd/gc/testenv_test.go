@@ -191,6 +191,7 @@ func liveEnvKeysForTests() []string {
 func preserveTestControlEnv(key string) bool {
 	return key == "GC_FAST_UNIT" ||
 		key == "GC_REAL_PROCESS_SIGNAL_TESTS" ||
+		key == "GC_ALLOW_AMBIENT_BEADS_IN_TESTS" ||
 		key == "GC_WORKER_REPORT_DIR" ||
 		key == managedDoltTestModeEnv ||
 		key == managedDoltTestParentPIDEnv ||
@@ -203,6 +204,12 @@ func preserveTestControlEnv(key string) bool {
 func TestPreserveTestControlEnvKeepsRealProcessSignalGate(t *testing.T) {
 	if !preserveTestControlEnv("GC_REAL_PROCESS_SIGNAL_TESTS") {
 		t.Fatal("GC_REAL_PROCESS_SIGNAL_TESTS must survive cmd/gc test env scrubbing")
+	}
+}
+
+func TestPreserveTestControlEnvKeepsAmbientBeadsOptOut(t *testing.T) {
+	if !preserveTestControlEnv("GC_ALLOW_AMBIENT_BEADS_IN_TESTS") {
+		t.Fatal("GC_ALLOW_AMBIENT_BEADS_IN_TESTS must survive cmd/gc test env scrubbing")
 	}
 }
 
