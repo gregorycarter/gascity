@@ -186,6 +186,7 @@
             "group": "How-to",
             "pages": [
               "guides/configuring-an-agent",
+              "guides/self-healing-throughput",
               "guides/harness-recipes",
               "guides/shareable-packs",
               "guides/registry-showcase",

@@ -16,6 +16,7 @@ the rest are task-oriented.
 ## How-to
 
 - [Configuring an Agent](/guides/configuring-an-agent) — the five axes (harness, model, upstream, transport, runtime) and how to set each in city.toml / agent.toml.
+- [Configure the Self-Healing Loop](/guides/self-healing-throughput) — detect stalled delivery, apply bounded recovery actions, and audit the result.
 - [Harness Recipes](/guides/harness-recipes) — per-harness, copy-paste upstream + model setup for each built-in CLI; the fast path to swapping onto Gas City.
 - [Create and Share Packs](/guides/shareable-packs) — create, import, and customize packs across the `pack.toml` / `city.toml` / `.gc/` boundary.
 - [Find and Import Public Packs](/guides/registry-showcase) — find and import first-party packs from the public Gas City registry.
