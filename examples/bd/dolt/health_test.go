@@ -1061,6 +1061,17 @@ func TestHealthScriptProbesConfiguredExternalHost(t *testing.T) {
 	writeExecutable(t, filepath.Join(fakeBin, "gc"), "#!/bin/sh\nexit 1\n")
 	writeExecutable(t, filepath.Join(fakeBin, "lsof"), "#!/bin/sh\nexit 1\n")
 	writeExecutable(t, filepath.Join(fakeBin, "nc"), "#!/bin/sh\nexit 1\n")
+	// This test verifies the external-host branch, not timeout-tool
+	// availability. Use a forwarding gtimeout shim so a busy shared host
+	// cannot spend the five-second probe budget starting Python's fallback
+	// wrapper before the fake Dolt client is ready.
+	writeExecutable(t, filepath.Join(fakeBin, "gtimeout"), `#!/bin/sh
+if [ "$1" = "--kill-after=2" ]; then
+  shift
+fi
+shift
+exec "$@"
+`)
 	// Append (not overwrite) each invocation's args: for an external endpoint
 	// health issues the SELECT 1 reachability probe AND a SHOW DATABASES catalog
 	// query, so a single-write fake would clobber the SELECT 1 record.
