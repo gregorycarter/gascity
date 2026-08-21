@@ -199,6 +199,7 @@ build_cmd_gc_test_binary() {
     GOVCS="${GOVCS-}" \
     GOWORK="${GOWORK-}" \
     GC_FAST_UNIT="${gc_fast_unit}" \
+    GC_ALLOW_AMBIENT_BEADS_IN_TESTS=1 \
     CGO_CPPFLAGS="${cgo_cppflags}" \
     CGO_LDFLAGS="${cgo_ldflags}" \
     go test -c -o "${cmd_gc_binary}" ./cmd/gc \
@@ -249,6 +250,7 @@ generate_cmd_gc_manifest() {
     GC_FAST_UNIT="${gc_fast_unit}" \
     GC_TEST_SHARD_INDEX=1 \
     GC_TEST_SHARD_TOTAL="${cmd_gc_total}" \
+    GC_ALLOW_AMBIENT_BEADS_IN_TESTS=1 \
     CGO_CPPFLAGS="${cgo_cppflags}" \
     CGO_LDFLAGS="${cgo_ldflags}" \
     "${cmd_gc_binary}" -test.timeout "${go_test_timeout}" -test.list '^Test' \

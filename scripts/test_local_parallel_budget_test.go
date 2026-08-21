@@ -94,6 +94,20 @@ func TestLocalParallelCmdGCShardsShareDiscoveryManifest(t *testing.T) {
 	}
 }
 
+// TestLocalParallelCmdGCSetupPreservesTestStoreGuard proves the one-time
+// build and discovery processes keep the same explicit ambient-store opt-in
+// as the shard processes. The runner intentionally uses env -i, so omitting
+// this variable makes discovery fail in a worktree with a beads redirect.
+func TestLocalParallelCmdGCSetupPreservesTestStoreGuard(t *testing.T) {
+	script := localParallelScript(t)
+	for _, function := range []string{"build_cmd_gc_test_binary", "generate_cmd_gc_manifest"} {
+		body := shellFunctionBody(t, script, function)
+		if !strings.Contains(body, "GC_ALLOW_AMBIENT_BEADS_IN_TESTS=1") {
+			t.Fatalf("%s does not preserve the test-store guard opt-in across env -i:\n%s", function, body)
+		}
+	}
+}
+
 // TestFastParallelForwardsTimeoutOverridePastEnvScrub proves the documented
 // `GO_TEST_TIMEOUT=30m make test-fast-parallel` escape hatch actually reaches
 // the runner. The target wraps the script in TEST_ENV's `env -i`, which drops
