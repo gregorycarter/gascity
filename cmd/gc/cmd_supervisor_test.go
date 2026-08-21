@@ -4589,6 +4589,8 @@ func TestStopManagedCityForcesCleanupAfterTimeout(t *testing.T) {
 		},
 	}
 
+	_ = exec.Command(script, "health").Run()
+
 	var stderr bytes.Buffer
 	start := time.Now()
 	err := stopManagedCity(mc, cityPath, &stderr)
@@ -4693,6 +4695,8 @@ func TestStopManagedCityDoesNotUseStartupOrDriftTimeouts(t *testing.T) {
 			stderr: io.Discard,
 		},
 	}
+
+	_ = exec.Command(script, "health").Run()
 
 	var stderr bytes.Buffer
 	start := time.Now()
