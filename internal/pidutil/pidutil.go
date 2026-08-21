@@ -16,16 +16,26 @@ import (
 
 const (
 	psZombieTimeout  = 100 * time.Millisecond
-	childEnumTimeout = 1 * time.Second
-	// psStartTimeTimeout bounds the portable start-time probe. Callers sit in a
-	// post-SIGKILL reap loop, so a hung ps must not stall them.
-	psStartTimeTimeout = 1 * time.Second
+	defaultPSTimeout = 10 * time.Second
+	minPSTimeout     = time.Second
 )
 
-// psCmdlineTimeout bounds the portable argv probe. Callers run on reconciler
-// ticks, so a hung ps must not stall them; a timeout yields no argv, which the
-// identity check treats as "cannot confirm" and rejects.
-const psCmdlineTimeout = time.Second
+// psTimeout returns the deadline for a ps probe. The deadline prevents a wedged
+// process-table query from stalling callers, but is not a latency budget: ps
+// cost scales with the whole process table even when querying one PID. The
+// environment override keeps deliberately bounded tests fast while allowing
+// busy hosts enough time for a healthy query.
+func psTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("GC_PIDUTIL_PS_TIMEOUT"))
+	if raw == "" {
+		return defaultPSTimeout
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed < minPSTimeout {
+		return defaultPSTimeout
+	}
+	return parsed
+}
 
 // Alive reports whether a PID exists and is not a zombie.
 func Alive(pid int) bool {
@@ -234,7 +244,7 @@ func NormalizeArgv(argv []string) []string {
 // The enumeration helper's own pid is excluded below so it can never
 // masquerade as a leaked child.
 func ChildPIDs(parent int) ([]int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), childEnumTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), psTimeout())
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=")
@@ -283,7 +293,7 @@ func ChildPIDs(parent int) ([]int, error) {
 // Linux, and the consequence of a miss is the pre-existing conservative answer
 // rather than a wrong death.
 func psStartTime(pid int) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), psStartTimeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), psTimeout())
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output()
@@ -303,7 +313,7 @@ func psStartTime(pid int) (string, error) {
 //
 // -ww asks ps for full width, since a truncated argv fails the match on BSD ps.
 func psCmdline(pid int) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), psCmdlineTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), psTimeout())
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, "ps", "-ww", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
