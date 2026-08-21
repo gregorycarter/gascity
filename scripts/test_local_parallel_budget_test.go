@@ -94,6 +94,20 @@ func TestLocalParallelCmdGCShardsShareDiscoveryManifest(t *testing.T) {
 	}
 }
 
+// TestLocalParallelCmdGCPreflightPreservesAmbientBeadsOptOut guards the
+// one-time cmd/gc test-binary build and discovery pass. Both execute a test
+// binary before the shard fan-out, so the ambient-store opt-out must survive
+// their env -i scrub just as it does for each shard.
+func TestLocalParallelCmdGCPreflightPreservesAmbientBeadsOptOut(t *testing.T) {
+	script := localParallelScript(t)
+	for _, function := range []string{"build_cmd_gc_test_binary", "generate_cmd_gc_manifest"} {
+		body := shellFunctionBody(t, script, function)
+		if !strings.Contains(body, "GC_ALLOW_AMBIENT_BEADS_IN_TESTS=1") {
+			t.Fatalf("%s drops GC_ALLOW_AMBIENT_BEADS_IN_TESTS before invoking the cmd/gc test binary:\n%s", function, body)
+		}
+	}
+}
+
 // TestFastParallelForwardsTimeoutOverridePastEnvScrub proves the documented
 // `GO_TEST_TIMEOUT=30m make test-fast-parallel` escape hatch actually reaches
 // the runner. The target wraps the script in TEST_ENV's `env -i`, which drops
