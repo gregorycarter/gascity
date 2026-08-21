@@ -151,6 +151,15 @@ if [[ ${GO_TEST_MANIFEST+x} == x ]]; then
     exit 1
   fi
 
+  duplicate_manifest_entry="$(awk '
+    /^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+    seen[$0]++ { print $0; exit }
+  ' "$GO_TEST_MANIFEST")"
+  if [[ -n "$duplicate_manifest_entry" ]]; then
+    echo "duplicate go test manifest entry: ${duplicate_manifest_entry}" >&2
+    exit 1
+  fi
+
   line_number=0
   manifest_test_count=0
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -161,14 +170,6 @@ if [[ ${GO_TEST_MANIFEST+x} == x ]]; then
     if ! [[ "$line" =~ ^Test$ || "$line" =~ ^Test[A-Z0-9_][A-Za-z0-9_]*$ ]]; then
       echo "invalid go test manifest entry in ${GO_TEST_MANIFEST} at line ${line_number}: ${line}" >&2
       exit 1
-    fi
-    if (( manifest_test_count > 0 )); then
-      for existing in "${tests[@]}"; do
-        if [[ "$existing" == "$line" ]]; then
-          echo "duplicate go test manifest entry: ${line}" >&2
-          exit 1
-        fi
-      done
     fi
     tests+=("$line")
     manifest_test_count=$((manifest_test_count + 1))
