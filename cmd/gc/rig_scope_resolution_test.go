@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,5 +51,37 @@ func TestRigFromRedirectedBeadsDirIgnoresCwdOutsideCity(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("rigFromRedirectedBeadsDir() ok = true, want false; rig = %+v", rig)
+	}
+}
+
+func TestResolveBdScopeTargetAcceptsCityRedirect(t *testing.T) {
+	cityDir := t.TempDir()
+	agentDir := filepath.Join(cityDir, ".gc", "agents", "mayor")
+	if err := os.MkdirAll(filepath.Join(agentDir, ".beads"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(agent .beads): %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(agentDir, ".beads", "redirect"),
+		[]byte(filepath.Join(cityDir, ".beads")+"\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(redirect): %v", err)
+	}
+
+	setCwd(t, agentDir)
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "demo"},
+		Rigs: []config.Rig{
+			{Name: "frontend", Path: filepath.Join("rigs", "frontend"), Prefix: "fr"},
+		},
+	}
+
+	got, err := resolveBdScopeTarget(cfg, cityDir, "", []string{"list"}, false, io.Discard)
+	if err != nil {
+		t.Fatalf("resolveBdScopeTarget() error = %v, want nil", err)
+	}
+	want := bdCityScopeTarget(cityDir, cfg)
+	if got != want {
+		t.Fatalf("resolveBdScopeTarget() = %#v, want %#v", got, want)
 	}
 }

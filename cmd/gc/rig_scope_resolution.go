@@ -52,6 +52,10 @@ func rigFromRedirectedBeadsDir(cfg *config.City, cityPath, dir string) (config.R
 		if targetBeadsDir == "" {
 			continue
 		}
+		cityBeadsDir := normalizePathForCompare(filepath.Join(resolveStoreScopeRoot(cityPath, cityPath), ".beads"))
+		if targetBeadsDir == cityBeadsDir {
+			return config.Rig{}, false, nil
+		}
 		for _, rig := range cfg.Rigs {
 			if strings.TrimSpace(rig.Path) == "" {
 				continue
