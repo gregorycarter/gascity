@@ -2,12 +2,44 @@ package config
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 )
+
+func TestEphemeralAssignedProbesNarrowQueryByAssignee(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available; the work-query shell requires it")
+	}
+	logPath := filepath.Join(t.TempDir(), "bd-args.log")
+	bdScript := `#!/bin/sh
+case "$1" in
+  query) printf '%s\n' "$*" >> "$BD_ARGS_LOG" ;;
+esac
+printf '[]'
+`
+	script := standardAssignedWorkQueryScript(QueryTopology{}) + `printf "[]"`
+	runShellWithFakeBd(t, script, map[string]string{
+		"GC_SESSION_ID": "gascity/gastown.mayor",
+		"BD_ARGS_LOG":   logPath,
+	}, bdScript)
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd argument log: %v", err)
+	}
+	log := string(data)
+	for _, status := range []string{"in_progress", "open"} {
+		want := "query --json ephemeral=true AND status=" + status + " AND assignee=gascity/gastown.mayor --limit=0"
+		if !strings.Contains(log, want) {
+			t.Fatalf("ephemeral %s probe = %q, want assignee-constrained query containing %q", status, log, want)
+		}
+	}
+}
 
 // Regression coverage for the ephemeral (wisp) sibling of the gas-kg6 hold
 // gate, from the #5114 review: ephemeralAssignedInProgressProbeScript sits in

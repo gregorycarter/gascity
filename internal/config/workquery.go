@@ -209,6 +209,19 @@ func bdQueryEphemeralStatusQuietShell(status string) string {
 	return bdQueryEphemeralStatusShell(status) + ` 2>/dev/null`
 }
 
+// bdQueryEphemeralAssignedStatusQuietShell narrows an ephemeral assignment
+// probe at the bd query boundary. The jq stage still owns readiness details
+// that the query language cannot express (blocking dependencies and dispatch
+// holds), but the store never needs to scan unrelated ephemeral beads.
+func bdQueryEphemeralAssignedStatusQuietShell(status, shellVar string) string {
+	// Keep the fixed query prefix shell-quoted and concatenate the expanded
+	// identity as one argument. This preserves identities containing shell
+	// metacharacters as data while allowing the query engine to use assignee as
+	// a server-side predicate.
+	prefix := shellquote.Quote("ephemeral=true AND status=" + status + " AND assignee=")
+	return `bd query --json ` + prefix + `"$` + shellVar + `" --limit=0 2>/dev/null`
+}
+
 func legacyEphemeralReadyFilterJQ(selector string, limit int, excludeHoldLabels bool) string {
 	body := selector +
 		` | select(((.issue_type // .type // "") != "epic"))` +
@@ -484,7 +497,7 @@ func legacyControlAssignedReadyWorkQueryScript(topo QueryTopology) string {
 func ephemeralAssignedInProgressProbeScript(shellVar string, topo QueryTopology) string {
 	_ = topo
 	filter := `[.[] | select((.assignee // "") == $id)` + excludeHoldLabelsJQClause() + `] | .[:1]`
-	return `r=$(` + bdQueryEphemeralStatusQuietShell("in_progress") + ` | ` +
+	return `r=$(` + bdQueryEphemeralAssignedStatusQuietShell("in_progress", shellVar) + ` | ` +
 		`jq --arg id "$` + shellVar + `" ` + shellquote.Quote(filter) + ` 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; `
 }
@@ -501,7 +514,7 @@ func ephemeralAssignedReadyProbeScript(shellVar string, topo QueryTopology) stri
 		return ""
 	}
 	filter := legacyEphemeralReadyFilterJQ(`select((.assignee // "") == $id)`, 1, false)
-	return `r=$(` + bdQueryEphemeralStatusQuietShell("open") + ` | ` +
+	return `r=$(` + bdQueryEphemeralAssignedStatusQuietShell("open", shellVar) + ` | ` +
 		`jq --arg id "$` + shellVar + `" ` + shellquote.Quote(filter) + ` 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; `
 }
