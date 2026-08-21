@@ -205,7 +205,9 @@ func filterReadyByAssignee(ready []beads.Bead, assignee string, limit int) []bea
 // This is a route-scoped, unassigned tier (Tier 3 pool-demand/control-dispatcher
 // routing), so held beads must be excluded (ga-5736js): filterReadyByAssignee
 // (Tier 1/2, assignee-scoped) stays hold-transparent by design and must not
-// gain this filter.
+// gain this filter. Control-dispatcher routes intentionally use FIFO rather
+// than pool priority order because these beads sequence workflow transitions;
+// keep this ordering in sync with both routed_ready probes.
 func filterReadyByRoute(ready []beads.Bead, metadataKey, route string) []beads.Bead {
 	var matched []beads.Bead
 	for _, b := range ready {

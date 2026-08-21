@@ -172,6 +172,15 @@ Targets resolve to `Agent.PoolName` when set and
 `Agent.QualifiedName()` otherwise, so pool instances and pool templates
 land on the same routed queue.
 
+Control-dispatcher routed readiness is intentionally different from pool
+demand: its `gc.run_target` and `gc.routed_to` probes use oldest-first FIFO
+ordering. Control beads are workflow sequencing tokens (check, retry, fan-out,
+tally, drain, scope-check, and workflow-finalize), so preserving their order
+keeps a later transition from overtaking an earlier one in the same graph. The
+in-process `filterReadyByRoute` mirror uses the same ordering. Keep both routed
+probe forms and the mirror aligned; changing control ordering is a separate
+policy decision from the pool's priority-first claim order.
+
 Supported handoff forms are intentionally distinct. Generic pool demand is
 ready work with `assignee=""` and `gc.routed_to=<target>`; assigning the
 pool template itself is not pool demand. Direct named-session delivery is
