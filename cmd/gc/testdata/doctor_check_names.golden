@@ -17,6 +17,7 @@ implicit-import-cache
 deprecated-attachment-fields
 dolt-topology
 dolt-drift
+schema-drift
 config-valid
 legacy-suspended-field
 rollout:beads.conditional_writes
