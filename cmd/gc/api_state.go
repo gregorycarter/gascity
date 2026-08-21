@@ -636,6 +636,7 @@ func (cs *controllerState) startMaintenanceLoop(ctx context.Context) {
 		DiskFreeBytes:     doltContainerFreeBytesFunc,
 		DiskMinFreeBytes:  doltDiskMinFreeBytes(),
 		DiskWarnFreeBytes: doltDiskWarnFreeBytes(),
+		DiskBudgetConfig:  doltDiskConfig(),
 	}
 	active := deps.OpenDoltOps != nil && deps.OpenDoltBackup != nil
 	// Always log the loop's startup so operators can confirm initialization

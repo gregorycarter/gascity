@@ -15,6 +15,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/doltdisk"
 	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/mail"
 )
@@ -156,6 +157,11 @@ type StoreMaintenanceLoopDeps struct {
 	// threshold (but is still above DiskMinFreeBytes) StoreDiskWarn is
 	// emitted and the GC proceeds.
 	DiskWarnFreeBytes int64
+
+	// DiskBudgetConfig supplies the shared hysteresis and growth policy. When
+	// unset, DiskMinFreeBytes and DiskWarnFreeBytes retain compatibility with
+	// the original maintenance configuration.
+	DiskBudgetConfig doltdisk.Config
 }
 
 // StoreMaintenanceLoop runs periodic Dolt store maintenance inside the
@@ -178,6 +184,7 @@ type StoreMaintenanceLoop struct {
 	diskFreeBytes     func(path string) (int64, error)
 	diskMinFreeBytes  int64
 	diskWarnFreeBytes int64
+	diskBudget        *doltdisk.Budget
 
 	// mu is the in-process maintenance lease. runOnce and TriggerNow hold
 	// it for the duration of a single maintenance cycle; each contends on
@@ -233,6 +240,26 @@ func NewStoreMaintenanceLoop(deps StoreMaintenanceLoopDeps) *StoreMaintenanceLoo
 	if deps.Stderr == nil {
 		deps.Stderr = io.Discard
 	}
+	diskConfig := deps.DiskBudgetConfig
+	if diskConfig.CriticalBytes == 0 && deps.DiskMinFreeBytes > 0 {
+		diskConfig = doltdisk.DefaultConfig()
+		diskConfig.CriticalBytes = deps.DiskMinFreeBytes
+		diskConfig.WarningBytes = deps.DiskWarnFreeBytes
+		diskConfig.ResumeBytes = maxInt64(incrementInt64(deps.DiskWarnFreeBytes), doubleInt64(deps.DiskMinFreeBytes))
+		diskConfig.ReserveBytes = deps.DiskMinFreeBytes
+		diskConfig.ProjectionHorizon = 0
+		diskConfig.ThresholdSource = "maintenance"
+	}
+	var diskBudget *doltdisk.Budget
+	if deps.DiskFreeBytes != nil && diskConfig.CriticalBytes != 0 {
+		diskBudget = doltdisk.New(diskConfig, func(path string) (doltdisk.ProbeResult, error) {
+			free, err := deps.DiskFreeBytes(path)
+			if err != nil {
+				return doltdisk.ProbeResult{}, err
+			}
+			return doltdisk.ProbeResult{AvailableBytes: free, Filesystem: path, SampledAt: deps.Clock()}, nil
+		}, deps.Clock)
+	}
 	return &StoreMaintenanceLoop{
 		cfg:               deps.Cfg,
 		store:             deps.Store,
@@ -247,6 +274,7 @@ func NewStoreMaintenanceLoop(deps StoreMaintenanceLoopDeps) *StoreMaintenanceLoo
 		diskFreeBytes:     deps.DiskFreeBytes,
 		diskMinFreeBytes:  deps.DiskMinFreeBytes,
 		diskWarnFreeBytes: deps.DiskWarnFreeBytes,
+		diskBudget:        diskBudget,
 		lastRunAt:         deps.LastRunAt,
 		history:           make([]MaintenanceRun, 0, maintenanceHistorySize),
 	}
@@ -493,37 +521,41 @@ func (m *StoreMaintenanceLoop) emitRunEvent(run MaintenanceRun) {
 // disk-growing stages of a maintenance cycle (snapshot, then CALL DOLT_GC).
 // Returns true when both stages should be skipped (CRITICAL), false when the
 // cycle may proceed. Side-effects: emits
-// StoreDiskWarn or StoreDiskCritical events and logs to stderr.
-// Fails open: a probe error or a nil DiskFreeBytes always returns false.
+// StoreDiskWarn or StoreDiskCritical events and logs to stderr. Unknown
+// capacity skips disk-growing work because it cannot safely authorize writes.
 func (m *StoreMaintenanceLoop) checkDiskPreflight() bool {
-	if m.diskFreeBytes == nil || m.diskMinFreeBytes == 0 {
+	if m.diskBudget == nil {
 		return false
 	}
-	free, err := m.diskFreeBytes(m.cityPath)
-	if err != nil {
-		fmt.Fprintf(m.stderr, "store-maintenance: disk pre-flight probe failed (fail-open): %v\n", err) //nolint:errcheck
-		return false
-	}
-	const gib = float64(1 << 30)
-	if free < m.diskMinFreeBytes {
-		m.emitDiskEvent(events.StoreDiskCritical, free)
-		fmt.Fprintf(m.stderr, //nolint:errcheck
-			"store-maintenance: disk CRITICAL — %.1f GiB free (floor %.1f GiB) on %s; skipping snapshot and CALL DOLT_GC\n",
-			float64(free)/gib, float64(m.diskMinFreeBytes)/gib, m.cityPath)
+	report := m.diskBudget.Sample(m.cityPath)
+	if report.State == doltdisk.StateUnknown {
+		fmt.Fprintf(m.stderr, "store-maintenance: disk state unknown; skipping disk-growing stages: %s\n", report.ProbeError) //nolint:errcheck
 		return true
 	}
-	if m.diskWarnFreeBytes > 0 && free < m.diskWarnFreeBytes {
-		m.emitDiskEvent(events.StoreDiskWarn, free)
+	const gib = float64(1 << 30)
+	if report.State == doltdisk.StateCritical {
+		if report.Transition {
+			m.emitDiskEvent(events.StoreDiskCritical, report)
+		}
 		fmt.Fprintf(m.stderr, //nolint:errcheck
-			"store-maintenance: disk WARN — %.1f GiB free (warn %.1f GiB) on %s; proceeding\n",
-			float64(free)/gib, float64(m.diskWarnFreeBytes)/gib, m.cityPath)
+			"store-maintenance: disk CRITICAL — %.1f GiB free (floor %.1f GiB, source %s) on %s; skipping snapshot and CALL DOLT_GC\n",
+			float64(report.AvailableBytes)/gib, float64(report.CriticalBytes)/gib, report.ThresholdSource, m.cityPath)
+		return true
+	}
+	if report.State == doltdisk.StateWarning {
+		if report.Transition {
+			m.emitDiskEvent(events.StoreDiskWarn, report)
+		}
+		fmt.Fprintf(m.stderr, //nolint:errcheck
+			"store-maintenance: disk WARN — %.1f GiB free (warn %.1f GiB, source %s) on %s; proceeding\n",
+			float64(report.AvailableBytes)/gib, float64(report.WarningBytes)/gib, report.ThresholdSource, m.cityPath)
 	}
 	return false
 }
 
 // emitDiskEvent records a StoreDiskWarn or StoreDiskCritical event.
 // Best-effort: JSON marshal errors are silently dropped.
-func (m *StoreMaintenanceLoop) emitDiskEvent(eventType string, free int64) {
+func (m *StoreMaintenanceLoop) emitDiskEvent(eventType string, report doltdisk.Report) {
 	if m.recorder == nil {
 		return
 	}
@@ -531,15 +563,15 @@ func (m *StoreMaintenanceLoop) emitDiskEvent(eventType string, free int64) {
 	switch eventType {
 	case events.StoreDiskWarn:
 		payload = events.StoreDiskWarnPayload{
-			FreeBytes:  free,
-			WarnBytes:  m.diskWarnFreeBytes,
-			FloorBytes: m.diskMinFreeBytes,
+			FreeBytes:  report.AvailableBytes,
+			WarnBytes:  report.WarningBytes,
+			FloorBytes: report.CriticalBytes,
 			DataDir:    m.cityPath,
 		}
 	case events.StoreDiskCritical:
 		payload = events.StoreDiskCriticalPayload{
-			FreeBytes:  free,
-			FloorBytes: m.diskMinFreeBytes,
+			FreeBytes:  report.AvailableBytes,
+			FloorBytes: report.CriticalBytes,
 			DataDir:    m.cityPath,
 		}
 	default:
@@ -556,6 +588,29 @@ func (m *StoreMaintenanceLoop) emitDiskEvent(eventType string, free int64) {
 		Ts:      m.clock(),
 		Payload: raw,
 	})
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func incrementInt64(value int64) int64 {
+	const maxValue = int64(^uint64(0) >> 1)
+	if value == maxValue {
+		return value
+	}
+	return value + 1
+}
+
+func doubleInt64(value int64) int64 {
+	const maxValue = int64(^uint64(0) >> 1)
+	if value > maxValue/2 {
+		return maxValue
+	}
+	return value * 2
 }
 
 // sendFailureAlert posts one best-effort operator alert mail for a

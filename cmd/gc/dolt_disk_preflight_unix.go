@@ -3,9 +3,7 @@
 package main
 
 import (
-	"fmt"
-
-	"golang.org/x/sys/unix"
+	"github.com/gastownhall/gascity/internal/doltdisk"
 )
 
 // doltContainerFreeBytesFunc is the injectable disk-space reader used by
@@ -14,16 +12,12 @@ import (
 var doltContainerFreeBytesFunc = containerFreeBytes
 
 // containerFreeBytes returns the bytes available to an unprivileged process
-// in the filesystem containing path. Uses f_bavail×f_frsize (POSIX).
-//
-// On APFS, f_bavail excludes purgeable space and reflects actual write
-// capacity. Do NOT use f_bfree, os.Stat().Size(), or the Finder "available"
-// figure — all three include purgeable space and overstate free capacity on
-// APFS-formatted volumes.
+// in the filesystem containing path. The shared probe uses f_bavail×f_frsize
+// where the platform exposes f_frsize and the platform block size otherwise.
 func containerFreeBytes(path string) (int64, error) {
-	var stat unix.Statfs_t
-	if err := unix.Statfs(path, &stat); err != nil {
-		return -1, fmt.Errorf("statfs %q: %w", path, err)
+	result, err := doltdisk.Probe(path)
+	if err != nil {
+		return -1, err
 	}
-	return int64(stat.Bavail * uint64(stat.Bsize)), nil
+	return result.AvailableBytes, nil
 }

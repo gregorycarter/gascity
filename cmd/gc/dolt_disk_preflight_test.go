@@ -77,13 +77,12 @@ func TestDiskPreflightStatfsError(t *testing.T) {
 
 	var stderr bytes.Buffer
 	err := checkManagedDoltDiskPreflight("/data/dolt", 500<<20, 2<<30, &stderr)
-	// Fail-open: probe error must not block startup.
-	if err != nil {
-		t.Fatalf("expected nil error on probe failure (fail-open), got: %v", err)
+	// Unknown capacity must not authorize a disk-growing startup.
+	if err == nil {
+		t.Fatal("expected an explicit unknown-state error on probe failure")
 	}
-	// Probe error should be logged as a warning.
-	if !strings.Contains(stderr.String(), "fail-open") {
-		t.Errorf("expected fail-open message in stderr, got: %q", stderr.String())
+	if !strings.Contains(err.Error(), "disk state unknown") || !strings.Contains(err.Error(), probeErr.Error()) {
+		t.Errorf("error should expose unknown state and probe cause, got: %v", err)
 	}
 }
 

@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gastownhall/gascity/internal/doltdisk"
 )
 
 const (
@@ -28,55 +31,86 @@ var errDiskPreflightUnsupported = errors.New("disk preflight unavailable on this
 // doltDiskMinFreeBytes returns the critical floor from GC_DOLT_MIN_FREE_BYTES,
 // defaulting to 500 MiB. Zero disables the check entirely.
 func doltDiskMinFreeBytes() int64 {
-	if v := os.Getenv("GC_DOLT_MIN_FREE_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
-			return n
-		}
-	}
-	return doltDiskDefaultMinFreeBytes
+	return doltDiskConfig().CriticalBytes
 }
 
 // doltDiskWarnFreeBytes returns the soft floor from GC_DOLT_WARN_FREE_BYTES,
 // defaulting to 2 GiB.
 func doltDiskWarnFreeBytes() int64 {
-	if v := os.Getenv("GC_DOLT_WARN_FREE_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
-			return n
-		}
-	}
-	return doltDiskDefaultWarnFreeBytes
+	return doltDiskConfig().WarningBytes
+}
+
+func doltDiskConfig() doltdisk.Config {
+	return doltdisk.ConfigFromEnv(os.Getenv)
 }
 
 // checkManagedDoltDiskPreflight checks free disk space before a disk-growing
-// managed-Dolt operation. Returns a non-nil error when free space is below
-// minFree (CRITICAL) and minFree > 0. Logs a warning to stderr when free
-// space is below warnFree but above minFree. Fails open on probe error or
-// unsupported platform; callers must never block on a probe failure.
+// managed-Dolt operation. Returns a non-nil error when the state is critical
+// or unknown. Unknown is deliberately not treated as healthy: starting or
+// recovering Dolt can write journals, so an unmeasurable filesystem must not
+// authorize that operation. Unsupported platforms remain an explicit skip.
 func checkManagedDoltDiskPreflight(dataDir string, minFree, warnFree int64, stderr io.Writer) error {
 	if minFree == 0 {
 		return nil // check disabled via escape hatch
 	}
-	free, err := doltContainerFreeBytesFunc(dataDir)
-	if err != nil {
-		if errors.Is(err, errDiskPreflightUnsupported) {
-			return nil // platform stub — skip silently
+	cfg := doltdisk.DefaultConfig()
+	cfg.CriticalBytes = minFree
+	cfg.WarningBytes = warnFree
+	cfg.ResumeBytes = maxDiskBytes(diskIncrement(warnFree), diskDouble(minFree))
+	cfg.ReserveBytes = minFree
+	cfg.ProjectionHorizon = 0
+	cfg.ThresholdSource = "managed-start"
+	budget := doltdisk.New(cfg, func(path string) (doltdisk.ProbeResult, error) {
+		free, err := doltContainerFreeBytesFunc(path)
+		if err != nil {
+			return doltdisk.ProbeResult{}, err
 		}
-		fmt.Fprintf(stderr, "managed-dolt: disk pre-flight probe failed (fail-open): %v\n", err) //nolint:errcheck
-		return nil
+		return doltdisk.ProbeResult{AvailableBytes: free, Filesystem: path, SampledAt: time.Now()}, nil
+	}, time.Now)
+	report := budget.Sample(dataDir)
+	if report.State == doltdisk.StateUnknown {
+		if strings.Contains(report.ProbeError, errDiskPreflightUnsupported.Error()) {
+			return nil // platform stub — skip without claiming healthy
+		}
+		return fmt.Errorf("managed-dolt: disk state unknown: %s", report.ProbeError)
 	}
-	if free < minFree {
+	if report.State == doltdisk.StateCritical {
 		return fmt.Errorf(
 			"refusing to start managed Dolt: container free space %d bytes (%.1f GiB) "+
 				"is below the floor %d bytes (%.1f GiB) on %s; "+
 				"free disk space or set GC_DOLT_MIN_FREE_BYTES=0 to disable",
-			free, float64(free)/doltDiskGiB,
+			report.AvailableBytes, float64(report.AvailableBytes)/doltDiskGiB,
 			minFree, float64(minFree)/doltDiskGiB,
 			dataDir)
 	}
-	if warnFree > 0 && free < warnFree {
+	if report.State == doltdisk.StateWarning {
 		fmt.Fprintf(stderr, //nolint:errcheck
-			"managed-dolt: disk WARN — %.1f GiB free (floor %.1f GiB) on %s\n",
-			float64(free)/doltDiskGiB, float64(warnFree)/doltDiskGiB, dataDir)
+			"managed-dolt: disk WARN — %.1f GiB free (floor %.1f GiB, source %s) on %s\n",
+			float64(report.AvailableBytes)/doltDiskGiB, float64(warnFree)/doltDiskGiB,
+			report.ThresholdSource, dataDir)
 	}
 	return nil
+}
+
+func maxDiskBytes(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func diskIncrement(value int64) int64 {
+	const maxInt64Value = int64(^uint64(0) >> 1)
+	if value == maxInt64Value {
+		return value
+	}
+	return value + 1
+}
+
+func diskDouble(value int64) int64 {
+	const maxInt64Value = int64(^uint64(0) >> 1)
+	if value > maxInt64Value/2 {
+		return maxInt64Value
+	}
+	return value * 2
 }
