@@ -18,13 +18,23 @@ const (
 	lsofCommandTimeout   = 2 * time.Second
 )
 
+var (
+	managedDoltProcessArgsFn       = processArgs
+	managedDoltProcessCWDMatchesFn = processCWDMatches
+)
+
 type managedDoltProcessInspection struct {
 	ManagedPID              int
 	ManagedSource           string
 	ManagedOwned            bool
+	ManagedOwnership        managedDoltOwnership
 	ManagedDeletedInodes    bool
+	RuntimeStateRunning     bool
+	RuntimeStatePID         int
+	RuntimeIdentityMismatch bool
 	PortHolderPID           int
 	PortHolderOwned         bool
+	PortHolderOwnership     managedDoltOwnership
 	PortHolderDeletedInodes bool
 }
 
@@ -33,14 +43,24 @@ func inspectManagedDoltProcess(cityPath, port string) (managedDoltProcessInspect
 	if err != nil {
 		return managedDoltProcessInspection{}, err
 	}
-	info := managedDoltProcessInspection{}
+	info := managedDoltProcessInspection{
+		ManagedOwnership:    managedDoltOwnershipUnknown,
+		PortHolderOwnership: managedDoltOwnershipUnknown,
+	}
+	if state, stateErr := readDoltRuntimeStateFile(layout.StateFile); stateErr == nil {
+		info.RuntimeStateRunning = state.Running
+		info.RuntimeStatePID = state.PID
+		info.RuntimeIdentityMismatch = strings.TrimSpace(state.DataDir) != "" && !samePath(state.DataDir, layout.DataDir)
+	}
 	info.ManagedPID, info.ManagedSource = findManagedDoltPID(layout, port)
 	if info.ManagedPID > 0 {
-		info.ManagedOwned, info.ManagedDeletedInodes = inspectManagedDoltOwnership(info.ManagedPID, layout)
+		info.ManagedOwnership, info.ManagedDeletedInodes = inspectManagedDoltOwnershipStatus(info.ManagedPID, layout)
+		info.ManagedOwned = info.ManagedOwnership == managedDoltOwnershipOwned
 	}
 	info.PortHolderPID = findPortHolderPID(port)
 	if info.PortHolderPID > 0 {
-		info.PortHolderOwned, info.PortHolderDeletedInodes = inspectManagedDoltOwnership(info.PortHolderPID, layout)
+		info.PortHolderOwnership, info.PortHolderDeletedInodes = inspectManagedDoltOwnershipStatus(info.PortHolderPID, layout)
+		info.PortHolderOwned = info.PortHolderOwnership == managedDoltOwnershipOwned
 	}
 	return info, nil
 }
@@ -512,46 +532,62 @@ func psLinePID(line string) int {
 }
 
 func inspectManagedDoltOwnership(pid int, layout managedDoltRuntimeLayout) (bool, bool) {
+	ownership, deleted := inspectManagedDoltOwnershipStatus(pid, layout)
+	return ownership == managedDoltOwnershipOwned, deleted
+}
+
+func inspectManagedDoltOwnershipStatus(pid int, layout managedDoltRuntimeLayout) (managedDoltOwnership, bool) {
 	if pid <= 0 {
-		return false, false
+		return managedDoltOwnershipUnknown, false
 	}
 
 	stateDir := strings.TrimSpace(loadDoltRuntimeStateDataDir(layout.StateFile))
 	if stateDir != "" && !samePath(stateDir, layout.DataDir) {
-		return false, processHasDeletedDataInodes(pid, layout.DataDir)
+		return managedDoltOwnershipForeign, processHasDeletedDataInodes(pid, layout.DataDir)
 	}
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for {
-		owned := managedDoltProcessOwnedWithStateDir(pid, layout, stateDir)
+		ownership := managedDoltProcessOwnershipWithStateDir(pid, layout, stateDir)
 		deleted := processHasDeletedDataInodes(pid, layout.DataDir)
-		if owned || deleted || !pidAlive(pid) || time.Now().After(deadline) {
-			return owned, deleted
+		if ownership != managedDoltOwnershipUnknown || deleted || !pidAlive(pid) || time.Now().After(deadline) {
+			return ownership, deleted
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
 func managedDoltProcessOwnedWithStateDir(pid int, layout managedDoltRuntimeLayout, stateDir string) bool {
+	return managedDoltProcessOwnershipWithStateDir(pid, layout, stateDir) == managedDoltOwnershipOwned
+}
+
+func managedDoltProcessOwnershipWithStateDir(pid int, layout managedDoltRuntimeLayout, stateDir string) managedDoltOwnership {
 	if pid <= 0 {
-		return false
+		return managedDoltOwnershipUnknown
 	}
 	if stateDir != "" && !samePath(stateDir, layout.DataDir) {
-		return false
+		return managedDoltOwnershipForeign
 	}
 
-	procArgs, _ := processArgs(pid)
+	procArgs, err := managedDoltProcessArgsFn(pid)
+	if err != nil || strings.TrimSpace(procArgs) == "" {
+		return managedDoltOwnershipUnknown
+	}
 	switch {
 	case containsProcessConfig(procArgs, layout.ConfigFile):
-		return true
+		return managedDoltOwnershipOwned
 	case hasOtherProcessConfig(procArgs):
-		return false
+		return managedDoltOwnershipForeign
 	case processDataDirMatches(procArgs, layout.DataDir):
-		return true
-	case processCWDMatches(pid, layout.DataDir):
-		return true
+		return managedDoltOwnershipOwned
+	case managedDoltProcessCWDMatchesFn(pid, layout.DataDir):
+		return managedDoltOwnershipOwned
+	case strings.Contains(procArgs, "dolt sql-server"):
+		// The command is recognizably Dolt, but the restricted process
+		// inspector could not establish the configured identity.
+		return managedDoltOwnershipUnknown
 	default:
-		return false
+		return managedDoltOwnershipForeign
 	}
 }
 
@@ -669,9 +705,14 @@ func doltProcessInspectionFields(info managedDoltProcessInspection) []string {
 		fmt.Sprintf("managed_pid\t%d", info.ManagedPID),
 		"managed_source\t" + info.ManagedSource,
 		fmt.Sprintf("managed_owned\t%t", info.ManagedOwned),
+		"managed_ownership\t" + string(info.ManagedOwnership),
 		fmt.Sprintf("managed_deleted_inodes\t%t", info.ManagedDeletedInodes),
+		fmt.Sprintf("runtime_state_running\t%t", info.RuntimeStateRunning),
+		fmt.Sprintf("runtime_state_pid\t%d", info.RuntimeStatePID),
+		fmt.Sprintf("runtime_identity_mismatch\t%t", info.RuntimeIdentityMismatch),
 		fmt.Sprintf("port_holder_pid\t%d", info.PortHolderPID),
 		fmt.Sprintf("port_holder_owned\t%t", info.PortHolderOwned),
+		"port_holder_ownership\t" + string(info.PortHolderOwnership),
 		fmt.Sprintf("port_holder_deleted_inodes\t%t", info.PortHolderDeletedInodes),
 	}
 }

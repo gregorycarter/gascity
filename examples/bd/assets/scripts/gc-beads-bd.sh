@@ -785,6 +785,11 @@ load_probe_managed_from_gc() {
     gc_bin=$(resolve_gc_helper_bin)
     GC_PROBE_USED="false"
     GC_PROBE_RUNNING="false"
+    GC_PROBE_STATE=""
+    GC_PROBE_LIVENESS="unreachable"
+    GC_PROBE_SQL_LIVE="false"
+    GC_PROBE_OWNERSHIP="unknown"
+    GC_PROBE_INTEGRITY="unknown"
     GC_PROBE_PORT_HOLDER_PID=""
     GC_PROBE_PORT_HOLDER_OWNED="false"
     GC_PROBE_PORT_HOLDER_DELETED="false"
@@ -797,6 +802,26 @@ load_probe_managed_from_gc() {
         case "$key" in
             running)
                 GC_PROBE_RUNNING="$value"
+                parsed=true
+                ;;
+            state|overall_state)
+                [ -n "$value" ] && GC_PROBE_STATE="$value"
+                parsed=true
+                ;;
+            liveness)
+                GC_PROBE_LIVENESS="$value"
+                parsed=true
+                ;;
+            sql_live)
+                GC_PROBE_SQL_LIVE="$value"
+                parsed=true
+                ;;
+            ownership)
+                GC_PROBE_OWNERSHIP="$value"
+                parsed=true
+                ;;
+            integrity)
+                GC_PROBE_INTEGRITY="$value"
                 parsed=true
                 ;;
             port_holder_pid)
@@ -819,11 +844,11 @@ load_probe_managed_from_gc() {
     done <<EOF
 $output
 EOF
-    if [ "$status" -ne 0 ] && [ "$parsed" != "true" ]; then
+    if [ "$parsed" != "true" ]; then
         GC_PROBE_USED="false"
         return 1
     fi
-    [ "$status" -eq 0 ]
+    return 0
 }
 
 load_existing_managed_from_gc() {
@@ -1650,7 +1675,7 @@ wait_for_concurrent_start_ready() {
         fi
         if load_probe_managed_from_gc; then
             holder="$GC_PROBE_PORT_HOLDER_PID"
-            if [ "$GC_PROBE_RUNNING" = "true" ] && [ -n "$holder" ]; then
+            if [ "$GC_PROBE_STATE" = "serving_owned" ] && [ -n "$holder" ]; then
                 if do_query_probe; then
                     echo "$holder" > "$PID_FILE"
                     save_state "$holder" true
@@ -2255,13 +2280,16 @@ op_start() {
     # Check if a process already holds the port.
     if load_probe_managed_from_gc; then
         holder="$GC_PROBE_PORT_HOLDER_PID"
-        if [ "$GC_PROBE_RUNNING" = "true" ] && [ -n "$holder" ]; then
+        if [ "$GC_PROBE_STATE" = "serving_owned" ] && [ -n "$holder" ]; then
             # Our server is already running — update state and exit success.
             echo "$holder" > "$PID_FILE"
             save_state "$holder" true
             exit 0
         fi
         if [ -n "$holder" ]; then
+            if [ -n "$GC_PROBE_STATE" ] && [ "$GC_PROBE_STATE" != "serving_owned" ]; then
+                die "managed dolt on port $DOLT_PORT is in state $GC_PROBE_STATE; refusing automatic restart without a verified serving_owned process"
+            fi
             if [ "$GC_PROBE_PORT_HOLDER_OWNED" = "true" ]; then
                 graceful_stop_owned_pid "$holder" || \
                     die "could not stop dolt server (PID $holder) holding port $DOLT_PORT without risking journal corruption (check $LOG_FILE)"
@@ -2964,8 +2992,17 @@ op_health() {
     fi
 }
 
+# probe_degraded reports a listener that is alive or stale managed runtime
+# evidence but failed an ownership/integrity check. The structured state keeps
+# callers from mistaking a live server for "not running" and restarting it
+# blindly.
+probe_degraded() {
+    printf 'degraded\tpid=%s\tstate=%s\n' "${1:-unknown}" "${2:-identity_mismatch}"
+    exit 3
+}
+
 # op_probe checks if the dolt server is available.
-# Exit 0 = running, exit 2 = not running.
+# Exit 0 = serving_owned, exit 2 = unreachable, exit 3 = degraded.
 op_probe() {
     if is_remote; then
         # Remote server — check TCP.
@@ -2977,6 +3014,21 @@ op_probe() {
     fi
 
     if load_probe_managed_from_gc; then
+        case "$GC_PROBE_STATE" in
+            serving_owned)
+                exit 0
+                ;;
+            serving_ownership_unknown|identity_mismatch|stale_runtime)
+                probe_degraded "$GC_PROBE_PORT_HOLDER_PID" "$GC_PROBE_STATE"
+                ;;
+            unreachable)
+                if [ -n "$GC_PROBE_PORT_HOLDER_PID" ] || [ "$GC_PROBE_TCP_REACHABLE" = "true" ]; then
+                    probe_degraded "$GC_PROBE_PORT_HOLDER_PID" "unreachable"
+                fi
+                exit 2
+                ;;
+        esac
+        # Compatibility with an older helper that only emitted `running`.
         if [ "$GC_PROBE_RUNNING" = "true" ]; then
             exit 0
         fi
@@ -2991,7 +3043,7 @@ op_probe() {
             if [ "$GC_PORT_HOLDER_OWNED" = true ] && tcp_check; then
                 exit 0
             fi
-            exit 2
+            probe_degraded "$holder" "identity_mismatch"
         fi
     fi
     holder=$(find_port_holder)
@@ -3004,8 +3056,8 @@ op_probe() {
         exit 0
     fi
 
-    # Imposter or unreachable.
-    exit 2
+    # Listener present but identity unverified.
+    probe_degraded "$holder" "identity_mismatch"
 }
 
 enospc_helper="$(CDPATH= cd -- "$(dirname "$0")" && pwd)/dolt-enospc.sh"

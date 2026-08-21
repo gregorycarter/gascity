@@ -24,6 +24,16 @@ func writeFakeBeadsBD(t *testing.T, cityPath string, probeExit int) {
 		fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\n  probe) exit %d ;;\nesac\nexit 0\n", probeExit))
 }
 
+func writeFakeBeadsBDProbe(t *testing.T, cityPath, output string, probeExit int) {
+	t.Helper()
+	scriptsDir := filepath.Join(cityPath, ".gc", "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(scriptsDir, "gc-beads-bd.sh"),
+		fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\n  probe) printf '%%b' %q; exit %d ;;\nesac\nexit 0\n", output, probeExit))
+}
+
 func runStatus(t *testing.T, cityPath, host, port string) (string, error) {
 	t.Helper()
 	root := repoRoot(t)
@@ -97,5 +107,59 @@ func TestStatusScriptLocalRunningPrintsManagedText(t *testing.T) {
 	}
 	if strings.Contains(out, "external endpoint") {
 		t.Fatalf("local managed status must not use external-endpoint phrasing:\n%s", out)
+	}
+}
+
+func TestStatusScriptStructuredOwnershipUnknownNeverSaysNotRunning(t *testing.T) {
+	cityPath := t.TempDir()
+	writeFakeBeadsBDProbe(t, cityPath, "degraded\tpid=4242\tstate=serving_ownership_unknown\n", 3)
+
+	out, err := runStatus(t, cityPath, "127.0.0.1", "3311")
+	if err == nil {
+		t.Fatalf("status exited 0 for ownership-unknown server; want degraded\n%s", out)
+	}
+	for _, want := range []string{"SERVING", "OWNERSHIP-UNKNOWN", "pid 4242"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status output missing %q; got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(strings.ToLower(out), "not running") {
+		t.Fatalf("status reported ownership-unknown serving server as not running:\n%s", out)
+	}
+}
+
+func TestStatusScriptStructuredUnreachableListenerIsDegraded(t *testing.T) {
+	cityPath := t.TempDir()
+	writeFakeBeadsBDProbe(t, cityPath, "degraded\tpid=4242\tstate=unreachable\n", 3)
+
+	out, err := runStatus(t, cityPath, "127.0.0.1", "3311")
+	if err == nil {
+		t.Fatalf("status exited 0 for unresponsive listener; want degraded\n%s", out)
+	}
+	if !strings.Contains(out, "UNRESPONSIVE") || strings.Contains(strings.ToLower(out), "not running") {
+		t.Fatalf("status = %q, want unresponsive degraded verdict", out)
+	}
+}
+
+func TestStatusScriptStructuredIntegrityStates(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		state string
+		want  string
+	}{
+		{name: "identity mismatch", state: "identity_mismatch", want: "IDENTITY-MISMATCH"},
+		{name: "stale runtime", state: "stale_runtime", want: "STALE-RUNTIME"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cityPath := t.TempDir()
+			writeFakeBeadsBDProbe(t, cityPath, "degraded\tpid=4242\tstate="+tt.state+"\n", 3)
+			out, err := runStatus(t, cityPath, "127.0.0.1", "3311")
+			if err == nil {
+				t.Fatalf("status exited 0 for %s; want degraded\n%s", tt.state, out)
+			}
+			if !strings.Contains(out, tt.want) || strings.Contains(strings.ToLower(out), "not running") {
+				t.Fatalf("status = %q, want %q and no not-running verdict", out, tt.want)
+			}
+		})
 	}
 }
