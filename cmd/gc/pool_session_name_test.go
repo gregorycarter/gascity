@@ -447,6 +447,7 @@ func TestIsRecoverableUnassignedInProgressPoolWorkUsesLegacyWorkflowRunTarget(t 
 }
 
 func TestReleaseOrphanedPoolAssignments_DetachedProbeAliveSkipsRelease(t *testing.T) {
+	setDetachedProbeTimeoutForTest(t)
 	resetDetachedProbeErrorCountsForTest()
 	store := beads.NewMemStore()
 	work := createDetachedOrphanedPoolWork(t, store)
@@ -487,6 +488,7 @@ func TestReleaseOrphanedPoolAssignments_DetachedProbeAliveSkipsRelease(t *testin
 }
 
 func TestReleaseOrphanedPoolAssignments_DetachedProbeDeadReleasesAndClears(t *testing.T) {
+	setDetachedProbeTimeoutForTest(t)
 	resetDetachedProbeErrorCountsForTest()
 	store := beads.NewMemStore()
 	work := createDetachedOrphanedPoolWork(t, store)
@@ -521,6 +523,7 @@ func TestReleaseOrphanedPoolAssignments_DetachedProbeDeadReleasesAndClears(t *te
 }
 
 func TestReleaseOrphanedPoolAssignments_DetachedProbeDeadPreservesGuardWhenReleaseFails(t *testing.T) {
+	setDetachedProbeTimeoutForTest(t)
 	resetDetachedProbeErrorCountsForTest()
 	base := beads.NewMemStore()
 	work := createDetachedOrphanedPoolWork(t, base)
@@ -556,6 +559,7 @@ func TestReleaseOrphanedPoolAssignments_DetachedProbeDeadPreservesGuardWhenRelea
 }
 
 func TestReleaseOrphanedPoolAssignments_DetachedProbeErrorsReleaseOnThirdTick(t *testing.T) {
+	setDetachedProbeTimeoutForTest(t)
 	resetDetachedProbeErrorCountsForTest()
 	store := beads.NewMemStore()
 	work := createDetachedOrphanedPoolWork(t, store)

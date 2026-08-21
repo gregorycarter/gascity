@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const detachedProbeTestTimeout = 5 * time.Second
+
 func TestParseDetachedProbeSpec(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -77,6 +79,7 @@ func TestParseDetachedProbeSpec(t *testing.T) {
 }
 
 func TestProbeDetachedWork_TmuxExitStatus(t *testing.T) {
+	setDetachedProbeTimeoutForTest(t)
 	tests := []struct {
 		name       string
 		exitCode   string
@@ -106,6 +109,12 @@ func TestProbeDetachedWork_TmuxExitStatus(t *testing.T) {
 				t.Fatalf("tmux args = %q, want %q", string(args), wantArgs)
 			}
 		})
+	}
+}
+
+func TestProbeDetachedWork_UsesProductionTimeoutByDefault(t *testing.T) {
+	if got, want := detachedProbeTimeoutBudget, time.Second; got != want {
+		t.Fatalf("detachedProbeTimeoutBudget = %s, want production default %s", got, want)
 	}
 }
 
@@ -144,4 +153,13 @@ func installFakeTmux(t *testing.T, body string) {
 		pathEnv += string(os.PathListSeparator) + existing
 	}
 	t.Setenv("PATH", pathEnv)
+}
+
+func setDetachedProbeTimeoutForTest(t *testing.T) {
+	t.Helper()
+	previous := detachedProbeTimeoutBudget
+	detachedProbeTimeoutBudget = detachedProbeTestTimeout
+	t.Cleanup(func() {
+		detachedProbeTimeoutBudget = previous
+	})
 }
