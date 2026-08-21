@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -110,6 +111,13 @@ gc-only "heartbeat <issue-id>" subcommand, which rewrites to
 so long-running workers can signal liveness to the dashboard, and
 "release-if-current <issue-id> <assignee>", which conditionally resets an
 in-progress assignment only when the bead still has that assignee.
+
+A frontier read ("gc bd ready", or "gc bd list --ready") also gains
+"--exclude-label hold:mayor --exclude-label hold:external" before exec: bd
+has no hold semantics, and every dispatch/claim path already treats held
+beads as unclaimable, so a raw ready listing that kept them would serve
+them for re-claim. Pass --exclude-label yourself to set the label policy,
+or --include-held (gc-only, not forwarded) to list held beads.
 
 gc bd forces BD_EXPORT_AUTO=false to prevent bd's git auto-export hook
 from wedging the wrapper after printing command output. If you need
@@ -411,6 +419,14 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 	reapStaleBdExportJSONL(target.ScopeRoot)
 	warnExternalBdOverrideDrift(stderr, cityPath, target)
 
+	// A frontier read (`ready`, or `list --ready`) answers "what is claimable"
+	// and bd has no hold semantics, so the passthrough appends the hold
+	// exclusions every dispatch/claim path already enforces — see
+	// bdReadyHoldExclusionArgs. Runs late so bdArgs is final for the trace
+	// below, and only on cities that reach exec at all (the relocated-class
+	// refusal above still fires first on a split city).
+	bdArgs = bdReadyHoldExclusionArgs(bdArgs)
+
 	// Resolve the same binary every other bd path in the tree resolves for
 	// this scope: a scope bound to a complete storage binding pins the bd
 	// build that speaks that backend, and the passthrough must honor the pin
@@ -481,6 +497,52 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return 0
+}
+
+// bdReadyHoldExclusionArgs rewrites a frontier-read argv (`bd ready`, or
+// `bd list --ready`, which bd documents as the same query) so the raw
+// passthrough honors the hold contract every dispatch and claim path already
+// enforces: a bead carrying a beadmeta.DispatchHoldLabels value is not
+// claimable work, and a ready listing that keeps serving one gets it
+// re-claimed (ga-5wh). bd itself has no hold semantics, so the exclusions are
+// appended here as ordinary --exclude-label flags before exec.
+//
+// The rewrite is skipped when the caller already passed --exclude-label — an
+// explicit label policy wins over the default — or opted out with
+// --include-held, a gc-only flag that is STRIPPED from the argv because bd
+// does not know it. Non-frontier invocations pass through unchanged.
+func bdReadyHoldExclusionArgs(bdArgs []string) []string {
+	if !bdRelocatedClassInvocationComputesFrontier(bdArgs) {
+		return bdArgs
+	}
+	includeHeld := false
+	callerExcludes := false
+	out := make([]string, 0, len(bdArgs)+2*len(beadmeta.DispatchHoldLabels))
+	for _, arg := range bdArgs {
+		if arg == "--exclude-label" || strings.HasPrefix(arg, "--exclude-label=") {
+			callerExcludes = true
+		}
+		if arg == "--include-held" {
+			includeHeld = true
+			continue
+		}
+		// The inline spelling of the opt-out, parsed the way the frontier
+		// flag's is (bdRelocatedClassFrontierFlagIsOn): a value bd's own
+		// parser would reject fails closed toward the flag being ON.
+		if name, value, inline := strings.Cut(arg, "="); inline && name == "--include-held" {
+			on, err := strconv.ParseBool(strings.TrimSpace(value))
+			includeHeld = err != nil || on
+			continue
+		}
+		out = append(out, arg)
+	}
+	if includeHeld || callerExcludes {
+		return out
+	}
+	for _, label := range beadmeta.DispatchHoldLabels {
+		out = append(out, "--exclude-label", label)
+	}
+	return out
 }
 
 func parseBdReleaseIfCurrentArgs(args []string) (id, expectedAssignee string, ok bool, err error) {

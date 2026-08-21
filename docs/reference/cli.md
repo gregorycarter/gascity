@@ -298,6 +298,13 @@ so long-running workers can signal liveness to the dashboard, and
 "release-if-current &lt;issue-id&gt; &lt;assignee&gt;", which conditionally resets an
 in-progress assignment only when the bead still has that assignee.
 
+A frontier read ("gc bd ready", or "gc bd list --ready") also gains
+"--exclude-label hold:mayor --exclude-label hold:external" before exec: bd
+has no hold semantics, and every dispatch/claim path already treats held
+beads as unclaimable, so a raw ready listing that kept them would serve
+them for re-claim. Pass --exclude-label yourself to set the label policy,
+or --include-held (gc-only, not forwarded) to list held beads.
+
 gc bd forces BD_EXPORT_AUTO=false to prevent bd's git auto-export hook
 from wedging the wrapper after printing command output. If you need
 auto-export behavior, invoke bd directly.
@@ -3338,6 +3345,9 @@ Rows are emitted in canonical ready order (priority, created_at, id) unless
 read is the true top-N of the merged set rather than the top-N of whichever
 store answered first.
 
+Beads on hold (hold:mayor, hold:external) are excluded by default, matching
+every dispatch and claim path; pass --include-held to list them.
+
 Every leg is read across both storage tiers, so the wisp/ephemeral rows an
 orchestration step runs as are claimable work here whether or not
 --include-ephemeral is passed.
@@ -3352,6 +3362,7 @@ gc ready [flags]
 | `--exclude-label` | stringArray |  | drop beads carrying this label (repeatable) |
 | `--exclude-type` | stringArray |  | drop beads of this issue type (repeatable) |
 | `--include-ephemeral` | bool |  | accept --include-ephemeral for bd-ready parity (every leg already spans the wisp tier) |
+| `--include-held` | bool |  | also list beads on hold (hold:mayor, hold:external), which are excluded by default |
 | `--json` | bool | `true` | accept --json for bd-ready parity (output is always a JSON array) |
 | `--limit` | int |  | max beads to return (0 = unlimited) |
 | `--metadata-field` | stringArray |  | require metadata "key=value", or bare "key" for any non-empty value (repeatable) |

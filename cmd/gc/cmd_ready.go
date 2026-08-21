@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/spf13/cobra"
 )
@@ -139,6 +140,7 @@ type readyOpts struct {
 	metadataFields []string
 	excludeTypes   []string
 	excludeLabels  []string
+	includeHeld    bool
 	sortOrder      string
 	limit          int
 	status         string
@@ -180,6 +182,9 @@ Rows are emitted in canonical ready order (priority, created_at, id) unless
 read is the true top-N of the merged set rather than the top-N of whichever
 store answered first.
 
+Beads on hold (hold:mayor, hold:external) are excluded by default, matching
+every dispatch and claim path; pass --include-held to list them.
+
 Every leg is read across both storage tiers, so the wisp/ephemeral rows an
 orchestration step runs as are claimable work here whether or not
 --include-ephemeral is passed.`,
@@ -196,6 +201,11 @@ orchestration step runs as are claimable work here whether or not
 	cmd.Flags().StringArrayVar(&opts.metadataFields, "metadata-field", nil, "require metadata \"key=value\", or bare \"key\" for any non-empty value (repeatable)")
 	cmd.Flags().StringArrayVar(&opts.excludeTypes, "exclude-type", nil, "drop beads of this issue type (repeatable)")
 	cmd.Flags().StringArrayVar(&opts.excludeLabels, "exclude-label", nil, "drop beads carrying this label (repeatable)")
+	// Held beads (beadmeta.DispatchHoldLabels) are excluded by DEFAULT, the
+	// same contract every dispatch and claim path already enforces: a ready
+	// listing that keeps serving a held bead gets it re-claimed (ga-5wh).
+	// --include-held is the opt-out for the "list my held beads" question.
+	cmd.Flags().BoolVar(&opts.includeHeld, "include-held", false, "also list beads on hold (hold:mayor, hold:external), which are excluded by default")
 	cmd.Flags().StringVar(&opts.sortOrder, "sort", "", "sort order: oldest|newest (default: canonical ready order)")
 	cmd.Flags().IntVar(&opts.limit, "limit", 0, "max beads to return (0 = unlimited)")
 	// --include-ephemeral is accepted for parity with `bd ready`, which the
@@ -339,6 +349,11 @@ func readyStatusSelector(status string) (string, error) {
 // are different backends with different filter semantics, and a predicate
 // evaluated once over the merged set gives one answer instead of one answer per
 // store.
+//
+// beadmeta.DispatchHoldLabels are excluded by DEFAULT, over the merged set like
+// every other predicate: this reader serves claimable work, and a held bead
+// served as work is re-claimed forever (ga-5wh). --include-held lifts the
+// default; an explicit --exclude-label behaves exactly as before.
 func filterReadyBeads(items []beads.Bead, opts readyOpts, metaWant []metadataFieldFilter) []beads.Bead {
 	assignee := strings.TrimSpace(opts.assignee)
 	exclude := make(map[string]bool, len(opts.excludeTypes))
@@ -346,6 +361,10 @@ func filterReadyBeads(items []beads.Bead, opts readyOpts, metaWant []metadataFie
 		if t = strings.TrimSpace(t); t != "" {
 			exclude[t] = true
 		}
+	}
+	excludeLabels := opts.excludeLabels
+	if !opts.includeHeld {
+		excludeLabels = slices.Concat(opts.excludeLabels, beadmeta.DispatchHoldLabels)
 	}
 	out := make([]beads.Bead, 0, len(items))
 	for _, b := range items {
@@ -358,7 +377,7 @@ func filterReadyBeads(items []beads.Bead, opts readyOpts, metaWant []metadataFie
 		if exclude[b.Type] {
 			continue
 		}
-		if beadCarriesExcludedLabel(b, opts.excludeLabels) {
+		if beadCarriesExcludedLabel(b, excludeLabels) {
 			continue
 		}
 		if !beadMatchesMetadata(b, metaWant) {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -82,6 +83,178 @@ func TestExtractRigFlag(t *testing.T) {
 				if gotArgs[i] != tt.wantArgs[i] {
 					t.Errorf("args[%d] = %q, want %q", i, gotArgs[i], tt.wantArgs[i])
 				}
+			}
+		})
+	}
+}
+
+// TestGcBdReadyExcludesHeldBeads pins the hold contract on the raw
+// passthrough: a frontier read (`gc bd ready`, or `gc bd list --ready`, which
+// bd documents as the same query) must not list held beads, because bd has no
+// hold semantics and every dispatch/claim path already excludes
+// beadmeta.DispatchHoldLabels — a listing that keeps serving a held bead gets
+// it re-claimed (ga-5wh). The wrapper appends the exclusions before exec
+// unless the caller set an explicit label policy (--exclude-label) or opted
+// out with the gc-only --include-held, which is stripped rather than
+// forwarded to a bd that does not know it.
+func TestGcBdReadyExcludesHeldBeads(t *testing.T) {
+	disableManagedDoltRecoveryForTest(t)
+
+	origCityFlag := cityFlag
+	origRigFlag := rigFlag
+	origProbe := bdBeadExists
+	defer func() {
+		cityFlag = origCityFlag
+		rigFlag = origRigFlag
+		bdBeadExists = origProbe
+	}()
+	cityFlag = ""
+	rigFlag = ""
+	bdBeadExists = func(string, *config.City, execStoreTarget, string) bool { return false }
+
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(`[workspace]
+name = "demo"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// See TestResolveBdScopeTarget for rationale: isolate cwd so any
+	// `.beads/redirect` in the ambient working tree doesn't surface here.
+	setCwd(t, cityDir)
+
+	binDir := t.TempDir()
+	capture := filepath.Join(t.TempDir(), "gc-bd-ready-args.txt")
+	script := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+set -eu
+printf 'args=%s\n' "$*" >> "${CAPTURE_PATH}"
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CAPTURE_PATH", capture)
+	t.Setenv("GC_CITY_PATH", cityDir)
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			"ready injects hold exclusions",
+			[]string{"ready"},
+			"ready --exclude-label hold:mayor --exclude-label hold:external",
+		},
+		{
+			"list --ready injects hold exclusions",
+			[]string{"list", "--ready"},
+			"list --ready --exclude-label hold:mayor --exclude-label hold:external",
+		},
+		{
+			"caller --exclude-label wins",
+			[]string{"ready", "--exclude-label", "triage"},
+			"ready --exclude-label triage",
+		},
+		{
+			"--include-held opts out and is not forwarded",
+			[]string{"ready", "--include-held"},
+			"ready",
+		},
+		{
+			"non-frontier list is untouched",
+			[]string{"list", "--status", "open"},
+			"list --status open",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if got := doBd(tt.args, &stdout, &stderr); got != 0 {
+				t.Fatalf("doBd(%v) = %d, want 0; stderr=%q", tt.args, got, stderr.String())
+			}
+			data, err := os.ReadFile(capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+			got := strings.TrimPrefix(lines[len(lines)-1], "args=")
+			if got != tt.want {
+				t.Fatalf("bd args = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBdReadyHoldExclusionArgs pins the argv rewrite itself, including the
+// shapes the passthrough integration above does not reach: the inline flag
+// spellings, the --ready=false selector, and bd root flags in front of the
+// verb.
+func TestBdReadyHoldExclusionArgs(t *testing.T) {
+	injected := []string{"--exclude-label", "hold:mayor", "--exclude-label", "hold:external"}
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			"non-frontier verb untouched",
+			[]string{"list", "--status", "open"},
+			[]string{"list", "--status", "open"},
+		},
+		{
+			"ready gains the hold exclusions",
+			[]string{"ready"},
+			append([]string{"ready"}, injected...),
+		},
+		{
+			"list --ready gains the hold exclusions",
+			[]string{"list", "--ready"},
+			append([]string{"list", "--ready"}, injected...),
+		},
+		{
+			"list --ready=false is not a frontier read",
+			[]string{"list", "--ready=false"},
+			[]string{"list", "--ready=false"},
+		},
+		{
+			"root flags before the verb still inject",
+			[]string{"--json", "ready"},
+			append([]string{"--json", "ready"}, injected...),
+		},
+		{
+			"caller --exclude-label wins",
+			[]string{"ready", "--exclude-label", "triage"},
+			[]string{"ready", "--exclude-label", "triage"},
+		},
+		{
+			"caller inline --exclude-label= wins",
+			[]string{"ready", "--exclude-label=triage"},
+			[]string{"ready", "--exclude-label=triage"},
+		},
+		{
+			"--include-held is stripped and suppresses injection",
+			[]string{"ready", "--include-held"},
+			[]string{"ready"},
+		},
+		{
+			"--include-held=false still injects",
+			[]string{"ready", "--include-held=false"},
+			append([]string{"ready"}, injected...),
+		},
+		{
+			"unparseable --include-held value fails closed toward the opt-out",
+			[]string{"ready", "--include-held=banana"},
+			[]string{"ready"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := bdReadyHoldExclusionArgs(tt.args)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("bdReadyHoldExclusionArgs(%v) = %v, want %v", tt.args, got, tt.want)
 			}
 		})
 	}

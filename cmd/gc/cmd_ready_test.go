@@ -709,6 +709,13 @@ func newReadyCityWithBrokenRig(t *testing.T) string {
 
 // TestReadyFiltersAreAppliedOverTheMergedSet covers the remaining work_query
 // predicates: --unassigned, --assignee, --exclude-type and --exclude-label.
+//
+// Held beads (beadmeta.DispatchHoldLabels) are excluded BY DEFAULT, the same
+// contract every dispatch and claim path already enforces — a raw ready
+// listing that keeps serving a held bead gets it re-claimed (ga-5wh). The
+// cases that exercise an unrelated predicate pass --include-held so the held
+// fixture keeps isolating that predicate, and two dedicated cases pin the
+// default and the opt-out.
 func TestReadyFiltersAreAppliedOverTheMergedSet(t *testing.T) {
 	store := splittest.NewWorkStore(t, "gc")
 	plain := mustCreateReadyBead(t, store, beads.Bead{Title: "plain", Type: "task"})
@@ -725,9 +732,11 @@ func TestReadyFiltersAreAppliedOverTheMergedSet(t *testing.T) {
 		opts readyOpts
 		want []string
 	}{
-		{"unassigned drops claimed work", readyOpts{unassigned: true}, []string{plain.ID, held.ID, epic.ID}},
+		{"held work is excluded by default", readyOpts{}, []string{plain.ID, epic.ID, assigned.ID}},
+		{"include-held lists held work", readyOpts{includeHeld: true}, []string{plain.ID, held.ID, epic.ID, assigned.ID}},
+		{"unassigned drops claimed work", readyOpts{unassigned: true, includeHeld: true}, []string{plain.ID, held.ID, epic.ID}},
 		{"assignee keeps only that identity", readyOpts{assignee: owner}, []string{assigned.ID}},
-		{"exclude-type drops epics", readyOpts{excludeTypes: []string{"epic"}}, []string{plain.ID, held.ID, assigned.ID}},
+		{"exclude-type drops epics", readyOpts{excludeTypes: []string{"epic"}, includeHeld: true}, []string{plain.ID, held.ID, assigned.ID}},
 		{"exclude-label drops held work", readyOpts{excludeLabels: []string{"hold:mayor"}}, []string{plain.ID, epic.ID, assigned.ID}},
 	}
 	for _, tt := range tests {
