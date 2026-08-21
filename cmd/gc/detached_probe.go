@@ -20,6 +20,8 @@ const (
 	detachedProbeErrorThreshold = 3
 )
 
+var detachedProbeTimeoutBudget = detachedProbeDefaultTimeout
+
 type detachedProbeStatus string
 
 const (
@@ -70,7 +72,7 @@ func parseDetachedProbeSpec(spec string) (detachedProbeSpec, error) {
 }
 
 func probeDetachedWork(ctx context.Context, spec string) detachedProbeResult {
-	return probeDetachedWorkWithTimeout(ctx, spec, detachedProbeDefaultTimeout)
+	return probeDetachedWorkWithTimeout(ctx, spec, detachedProbeTimeoutBudget)
 }
 
 func probeDetachedWorkWithTimeout(ctx context.Context, spec string, timeout time.Duration) detachedProbeResult {
