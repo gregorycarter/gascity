@@ -68,10 +68,13 @@ func TestGlobalFlagsPresentOnEverySubcommand(t *testing.T) {
 
 func TestCreateStatusFlagsConsumeValues(t *testing.T) {
 	value := ValueFlags("create")
-	for _, flag := range []string{"-s", "--status"} {
+	for _, flag := range []string{"-s", "--status", "--storage-class"} {
 		if !value[flag] {
 			t.Errorf("ValueFlags(create)[%q] = false, want true", flag)
 		}
+	}
+	if !BoolFlags("create")["--allow-empty-description"] {
+		t.Error(`BoolFlags(create)["--allow-empty-description"] = false, want true`)
 	}
 }
 
@@ -118,6 +121,7 @@ func TestListFlagSets(t *testing.T) {
 		"--include-infra", "--include-templates", "--long", "--no-assignee",
 		"--no-labels", "--no-pager", "--no-parent", "--no-pinned", "--overdue",
 		"--pinned", "--pretty", "--ready", "--reverse", "-r", "--skip-labels",
+		"--brief",
 		"--tree", "--watch", "-w",
 	} {
 		if !boolFlags[f] {
@@ -128,10 +132,34 @@ func TestListFlagSets(t *testing.T) {
 
 func TestReadyFlagSets(t *testing.T) {
 	boolFlags := BoolFlags("ready")
-	for _, f := range []string{"--unassigned", "-u"} {
+	for _, f := range []string{"--brief", "--unassigned", "-u"} {
 		if !boolFlags[f] {
 			t.Errorf("BoolFlags(ready)[%q] = false, want true", f)
 		}
+	}
+	for _, f := range []string{"--label-pattern", "--label-regex", "--max-rows"} {
+		if !ValueFlags("ready")[f] {
+			t.Errorf("ValueFlags(ready)[%q] = false, want true", f)
+		}
+	}
+}
+
+func TestNewBd12FlagSets(t *testing.T) {
+	for _, f := range []string{"--deps", "--external-contains", "--max-rows"} {
+		if !ValueFlags("list")[f] {
+			t.Errorf("ValueFlags(list)[%q] = false, want true", f)
+		}
+	}
+	if !BoolFlags("show")["--brief-deps"] {
+		t.Error(`BoolFlags(show)["--brief-deps"] = false, want true`)
+	}
+	for _, f := range []string{"--if-assignee", "--if-status"} {
+		if !ValueFlags("update")[f] {
+			t.Errorf("ValueFlags(update)[%q] = false, want true", f)
+		}
+	}
+	if !BoolFlags("update")["--force"] {
+		t.Error(`BoolFlags(update)["--force"] = false, want true`)
 	}
 }
 

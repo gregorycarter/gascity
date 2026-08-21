@@ -3,7 +3,7 @@
 // and the gc lint check that validates bd invocations embedded in prompt
 // templates, so the two call sites cannot drift apart from each other.
 //
-// Sourced from bd <sub> --help output (2026-07-13, bd v1.1.0).
+// Sourced from bd <sub> --help output (2026-08-21, bd v1.2.1).
 package bdflags
 
 import "sort"
@@ -11,14 +11,14 @@ import "sort"
 // globalValueFlags are accepted by every bd subcommand and consume the next
 // argument as their value.
 var globalValueFlags = map[string]bool{
-	"--actor": true, "--db": true, "-C": true, "--directory": true,
-	"--dolt-auto-commit": true,
+	"--actor": true, "--database": true, "--db": true, "-C": true,
+	"--directory": true, "--dolt-auto-commit": true, "--mem-profile": true,
 }
 
 // globalBoolFlags are accepted by every bd subcommand and take no value.
 var globalBoolFlags = map[string]bool{
-	"--global": true, "--ignore-schema-skew": true, "--json": true,
-	"--profile": true, "-q": true, "--quiet": true, "--readonly": true,
+	"--cpu-profile": true, "--global": true, "--ignore-schema-skew": true,
+	"--json": true, "--no-color": true, "--profile": true, "-q": true, "--quiet": true, "--readonly": true,
 	"--sandbox": true, "-v": true, "--verbose": true, "-h": true, "--help": true,
 }
 
@@ -38,14 +38,15 @@ var valueFlagsBySub = map[string]map[string]bool{
 		"--mol-type": true, "--notes": true, "--parent": true, "-p": true,
 		"--priority": true, "--repo": true, "--skills": true, "--spec-id": true,
 		"-s": true, "--status": true, "--title": true, "-t": true, "--type": true, "--waits-for": true,
-		"--waits-for-gate": true, "--wisp-type": true,
+		"--waits-for-gate": true, "--wisp-type": true, "--storage-class": true,
 	},
 	"update": {
 		"--acceptance": true, "--add-label": true, "--append-notes": true,
 		"-a": true, "--assignee": true, "--await-id": true, "--body-file": true,
 		"--defer": true, "-d": true, "--description": true, "--design": true,
 		"--design-file": true, "--due": true, "-e": true, "--estimate": true,
-		"--external-ref": true, "--metadata": true, "--notes": true,
+		"--external-ref": true, "--if-assignee": true, "--if-status": true,
+		"--metadata": true, "--notes": true,
 		"--parent": true, "-p": true, "--priority": true, "--remove-label": true,
 		"--session": true, "--set-labels": true, "--set-metadata": true,
 		"-s": true, "--status": true, "-t": true, "--type": true,
@@ -63,18 +64,20 @@ var valueFlagsBySub = map[string]map[string]bool{
 	"ready": {
 		"-a": true, "--assignee": true, "--exclude-label": true, "--exclude-type": true,
 		"--has-metadata-key": true, "-l": true, "--label": true, "--label-any": true,
+		"--label-pattern": true, "--label-regex": true,
 		"-n": true, "--limit": true, "--metadata-field": true, "--mol": true,
-		"--mol-type": true, "--offset": true, "--parent": true, "-p": true,
+		"--max-rows": true, "--mol-type": true, "--offset": true, "--parent": true, "-p": true,
 		"--priority": true, "-s": true, "--sort": true, "-t": true, "--type": true,
 	},
 	"list": {
 		"-a": true, "--assignee": true, "--closed-after": true, "--closed-before": true,
 		"--created-after": true, "--created-before": true, "--defer-after": true,
 		"--defer-before": true, "--desc-contains": true, "--due-after": true,
-		"--due-before": true, "--exclude-label": true, "--exclude-type": true,
+		"--deps": true, "--due-before": true, "--exclude-label": true, "--exclude-type": true,
+		"--external-contains": true, "--external-ref": true,
 		"--format": true, "--has-metadata-key": true, "--id": true, "-l": true,
 		"--label": true, "--label-any": true, "--label-pattern": true,
-		"--label-regex": true, "-n": true, "--limit": true, "--metadata-field": true,
+		"--label-regex": true, "-n": true, "--limit": true, "--max-rows": true, "--metadata-field": true,
 		"--mol-type": true, "--notes-contains": true, "--offset": true,
 		"--parent": true, "-p": true, "--priority": true, "--priority-max": true,
 		"--priority-min": true, "--sort": true, "--spec": true, "-s": true,
@@ -114,11 +117,12 @@ var valueFlagsBySub = map[string]map[string]bool{
 // global set. Same keying convention as valueFlagsBySub.
 var boolFlagsBySub = map[string]map[string]bool{
 	"create": {
-		"--dry-run": true, "--ephemeral": true, "--force": true, "--no-history": true,
+		"--allow-empty-description": true, "--dry-run": true, "--ephemeral": true, "--force": true, "--no-history": true,
 		"--no-inherit-labels": true, "--silent": true, "--stdin": true, "--validate": true,
 	},
 	"update": {
 		"--allow-empty-description": true, "--claim": true, "--ephemeral": true,
+		"--force":   true,
 		"--history": true, "--no-history": true, "--persistent": true, "--stdin": true,
 	},
 	"close": {
@@ -130,11 +134,11 @@ var boolFlagsBySub = map[string]map[string]bool{
 		"--cascade": true, "--dry-run": true, "-f": true, "--force": true,
 	},
 	"ready": {
-		"--claim": true, "--explain": true, "--gated": true, "--include-deferred": true,
+		"--brief": true, "--claim": true, "--explain": true, "--gated": true, "--include-deferred": true,
 		"--include-ephemeral": true, "--plain": true, "--pretty": true, "-u": true, "--unassigned": true,
 	},
 	"list": {
-		"--all": true, "--deferred": true, "--empty-description": true, "--flat": true,
+		"--all": true, "--brief": true, "--deferred": true, "--empty-description": true, "--flat": true,
 		"--include-gates": true, "--include-infra": true, "--include-templates": true,
 		"--long": true, "--no-assignee": true, "--no-labels": true, "--no-pager": true,
 		"--no-parent": true, "--no-pinned": true, "--overdue": true, "--pinned": true,
@@ -142,7 +146,7 @@ var boolFlagsBySub = map[string]map[string]bool{
 		"--skip-labels": true, "--tree": true, "-w": true, "--watch": true,
 	},
 	"show": {
-		"--children": true, "--current": true, "--include-comments": true,
+		"--brief-deps": true, "--children": true, "--current": true, "--include-comments": true,
 		"--include-dependents": true, "--local-time": true, "--long": true,
 		"--refs": true, "--short": true, "--thread": true, "-w": true, "--watch": true,
 	},
