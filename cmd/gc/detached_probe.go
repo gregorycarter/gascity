@@ -22,6 +22,13 @@ const (
 
 var detachedProbeTimeoutBudget = detachedProbeDefaultTimeout
 
+type detachedProbeCommandResult struct {
+	ExitCode int
+	Err      error
+}
+
+var runDetachedProbeCommand = runDetachedProbeCommandOS
+
 type detachedProbeStatus string
 
 const (
@@ -86,18 +93,31 @@ func probeDetachedWorkWithTimeout(ctx context.Context, spec string, timeout time
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(probeCtx, "tmux", "-L", parsed.Socket, "has-session", "-t", parsed.Session)
-	if err := cmd.Run(); err != nil {
+	result := runDetachedProbeCommand(probeCtx, parsed)
+	if result.Err != nil {
 		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
 			return detachedProbeResult{Status: detachedProbeTimeout, Spec: parsed, Err: probeCtx.Err()}
 		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		if result.ExitCode == 1 {
 			return detachedProbeResult{Status: detachedProbeDead, Spec: parsed}
 		}
-		return detachedProbeResult{Status: detachedProbeError, Spec: parsed, Err: err}
+		return detachedProbeResult{Status: detachedProbeError, Spec: parsed, Err: result.Err}
 	}
 	return detachedProbeResult{Status: detachedProbeAlive, Spec: parsed}
+}
+
+func runDetachedProbeCommandOS(ctx context.Context, spec detachedProbeSpec) detachedProbeCommandResult {
+	cmd := exec.CommandContext(ctx, "tmux", "-L", spec.Socket, "has-session", "-t", spec.Session)
+	err := cmd.Run()
+	if err == nil {
+		return detachedProbeCommandResult{}
+	}
+	result := detachedProbeCommandResult{Err: err}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+	}
+	return result
 }
 
 func incrementDetachedProbeErrorCount(id string) int {

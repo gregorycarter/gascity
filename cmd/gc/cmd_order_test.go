@@ -2731,6 +2731,14 @@ prefix = "ct"
 		}
 	}()
 	port := fmt.Sprint(listener.Addr().(*net.TCPAddr).Port)
+	previousPortHolderProbe := findPortHolderPIDFn
+	findPortHolderPIDFn = func(candidate string) int {
+		if candidate == port {
+			return os.Getpid()
+		}
+		return findPortHolderPID(candidate)
+	}
+	t.Cleanup(func() { findPortHolderPIDFn = previousPortHolderProbe })
 	stateDir := filepath.Join(cityDir, ".gc", "runtime", "packs", "dolt")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		t.Fatal(err)

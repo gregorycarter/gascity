@@ -85,6 +85,10 @@ func findPortHolderPID(port string) int {
 	return findPortHolderPIDFromLsof(port)
 }
 
+// findPortHolderPIDFn is the process-inspection seam used by tests that own a
+// synthetic listener. Production callers use findPortHolderPID unchanged.
+var findPortHolderPIDFn = findPortHolderPID
+
 func findPortHolderPIDFromLsof(port string) int {
 	if _, err := exec.LookPath("lsof"); err != nil {
 		return 0

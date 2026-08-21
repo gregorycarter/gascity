@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -79,34 +80,34 @@ func TestParseDetachedProbeSpec(t *testing.T) {
 }
 
 func TestProbeDetachedWork_TmuxExitStatus(t *testing.T) {
-	setDetachedProbeTimeoutForTest(t)
 	tests := []struct {
 		name       string
-		exitCode   string
+		exitCode   int
 		wantStatus detachedProbeStatus
 	}{
-		{name: "alive on exit zero", exitCode: "0", wantStatus: detachedProbeAlive},
-		{name: "dead on exit one", exitCode: "1", wantStatus: detachedProbeDead},
-		{name: "error on other exit", exitCode: "2", wantStatus: detachedProbeError},
+		{name: "alive on exit zero", exitCode: 0, wantStatus: detachedProbeAlive},
+		{name: "dead on exit one", exitCode: 1, wantStatus: detachedProbeDead},
+		{name: "error on other exit", exitCode: 2, wantStatus: detachedProbeError},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			argsFile := filepath.Join(t.TempDir(), "args")
-			installFakeTmux(t, `printf '%s\n' "$@" > "$FAKE_TMUX_ARGS"; exit `+tt.exitCode)
-			t.Setenv("FAKE_TMUX_ARGS", argsFile)
+			var gotSpec detachedProbeSpec
+			setDetachedProbeCommandForTest(t, func(_ context.Context, spec detachedProbeSpec) detachedProbeCommandResult {
+				gotSpec = spec
+				if tt.exitCode == 0 {
+					return detachedProbeCommandResult{}
+				}
+				return detachedProbeCommandResult{ExitCode: tt.exitCode, Err: errors.New("fake tmux exit")}
+			})
 
 			got := probeDetachedWork(context.Background(), "tmux:gascity:soak-loop")
 			if got.Status != tt.wantStatus {
 				t.Fatalf("Status = %q, want %q (err=%v)", got.Status, tt.wantStatus, got.Err)
 			}
-			args, err := os.ReadFile(argsFile)
-			if err != nil {
-				t.Fatalf("read fake tmux args: %v", err)
-			}
-			wantArgs := "-L\ngascity\nhas-session\n-t\nsoak-loop\n"
-			if string(args) != wantArgs {
-				t.Fatalf("tmux args = %q, want %q", string(args), wantArgs)
+			wantSpec := detachedProbeSpec{Kind: "tmux", Socket: "gascity", Session: "soak-loop"}
+			if gotSpec != wantSpec {
+				t.Fatalf("tmux spec = %+v, want %+v", gotSpec, wantSpec)
 			}
 		})
 	}
@@ -129,7 +130,10 @@ func TestProbeDetachedWork_MalformedSpecIsError(t *testing.T) {
 }
 
 func TestProbeDetachedWork_Timeout(t *testing.T) {
-	installFakeTmux(t, "sleep 1")
+	setDetachedProbeCommandForTest(t, func(ctx context.Context, _ detachedProbeSpec) detachedProbeCommandResult {
+		<-ctx.Done()
+		return detachedProbeCommandResult{Err: ctx.Err()}
+	})
 
 	got := probeDetachedWorkWithTimeout(context.Background(), "tmux:gascity:soak-loop", 10*time.Millisecond)
 	if got.Status != detachedProbeTimeout {
@@ -161,5 +165,14 @@ func setDetachedProbeTimeoutForTest(t *testing.T) {
 	detachedProbeTimeoutBudget = detachedProbeTestTimeout
 	t.Cleanup(func() {
 		detachedProbeTimeoutBudget = previous
+	})
+}
+
+func setDetachedProbeCommandForTest(t *testing.T, run func(context.Context, detachedProbeSpec) detachedProbeCommandResult) {
+	t.Helper()
+	previous := runDetachedProbeCommand
+	runDetachedProbeCommand = run
+	t.Cleanup(func() {
+		runDetachedProbeCommand = previous
 	})
 }
