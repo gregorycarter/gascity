@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gastownhall/gascity/internal/doltdisk"
 )
 
 type managedDoltRecoverReport struct {
@@ -29,6 +31,9 @@ type managedDoltRecoveryOps struct {
 	start            func(cityPath, host, port, user, logLevel string, timeout time.Duration) (managedDoltStartReport, error)
 	publish          func(cityPath string) error
 	failedCleanup    func(cityPath string, pid, port int, cause error) error
+	diskReport       func(cityPath string) (doltdisk.Report, error)
+	integrityCheck   func(cityPath string) (bool, error)
+	now              func() time.Time
 }
 
 func defaultManagedDoltRecoveryOps() managedDoltRecoveryOps {
@@ -42,10 +47,19 @@ func defaultManagedDoltRecoveryOps() managedDoltRecoveryOps {
 		},
 		preflightCleanup: managedDoltPreflightCleanupFn,
 		start: func(cityPath, host, port, user, logLevel string, timeout time.Duration) (managedDoltStartReport, error) {
-			return startManagedDoltProcessWithOptions(cityPath, host, port, user, logLevel, -1, timeout, false)
+			return startManagedDoltProcessWithOptionsUnlocked(cityPath, host, port, user, logLevel, -1, timeout, false)
 		},
 		publish:       publishManagedDoltRuntimeStateIfOwned,
 		failedCleanup: cleanupFailedManagedDoltRecovery,
+		diskReport: func(cityPath string) (doltdisk.Report, error) {
+			layout, err := resolveManagedDoltRuntimeLayout(cityPath)
+			if err != nil {
+				return doltdisk.Report{}, err
+			}
+			return managedDoltCircuitDiskReport(layout.DataDir)
+		},
+		integrityCheck: managedDoltCircuitIntegrityCheck,
+		now:            time.Now,
 	}
 }
 
@@ -105,6 +119,16 @@ func recoverManagedDoltProcessWithOps(cityPath, host, port, user, logLevel strin
 	defer releaseManagedDoltLifecycleLock(lockFile)
 	lockFile = nil
 
+	if err := managedDoltCircuitBeforeRecovery(cityPath, host, port, user, ops); err != nil {
+		return report, err
+	}
+	recordFailure := func(cause error) error {
+		if circuitErr := managedDoltCircuitRecordFailure(cityPath, cause, "", doltdisk.StateUnknown, report.PID, ops.nowOrTime()); circuitErr != nil {
+			return errors.Join(cause, circuitErr)
+		}
+		return cause
+	}
+
 	if parsedPort, parseErr := strconv.Atoi(strings.TrimSpace(port)); parseErr == nil {
 		report.Port = parsedPort
 	}
@@ -115,6 +139,9 @@ func recoverManagedDoltProcessWithOps(cityPath, host, port, user, logLevel strin
 			report.Healthy = true
 			if err := ops.publish(cityPath); err != nil {
 				return report, fmt.Errorf("publish managed dolt runtime state: %w", err)
+			}
+			if err := managedDoltCircuitMarkHealthy(cityPath, report.PID, ops.nowOrTime()); err != nil {
+				return report, fmt.Errorf("mark managed dolt circuit healthy: %w", err)
 			}
 			return report, nil
 		}
@@ -133,6 +160,9 @@ func recoverManagedDoltProcessWithOps(cityPath, host, port, user, logLevel strin
 			if err := ops.publish(cityPath); err != nil {
 				return report, fmt.Errorf("publish managed dolt runtime state: %w", err)
 			}
+			if err := managedDoltCircuitMarkHealthy(cityPath, report.PID, ops.nowOrTime()); err != nil {
+				return report, fmt.Errorf("mark managed dolt circuit healthy: %w", err)
+			}
 			recoverManagedDoltPopulateReportFromRuntimeState(cityPath, port, &report)
 			return report, nil
 		}
@@ -148,7 +178,8 @@ func recoverManagedDoltProcessWithOps(cityPath, host, port, user, logLevel strin
 	_ = stopErr
 
 	if err := ops.preflightCleanup(cityPath); err != nil {
-		return report, ops.failedCleanup(cityPath, report.PID, report.Port, err)
+		cause := ops.failedCleanup(cityPath, report.PID, report.Port, err)
+		return report, recordFailure(cause)
 	}
 
 	startReport, err := ops.start(cityPath, host, port, user, logLevel, timeout)
@@ -163,23 +194,30 @@ func recoverManagedDoltProcessWithOps(cityPath, host, port, user, logLevel strin
 		report.Port = portNum
 	}
 	if err != nil {
-		return report, err
+		return report, recordFailure(err)
 	}
 
 	health, err := ops.healthCheck(host, strconv.Itoa(report.Port), user)
 	if err != nil {
-		return report, ops.failedCleanup(cityPath, report.PID, report.Port, err)
+		cause := ops.failedCleanup(cityPath, report.PID, report.Port, err)
+		return report, recordFailure(cause)
 	}
 	if health.ReadOnly == "true" {
 		report.Healthy = false
-		return report, ops.failedCleanup(cityPath, report.PID, report.Port, fmt.Errorf("dolt server on %s:%d is still read-only after recovery", managedDoltConnectHost(host), report.Port))
+		cause := ops.failedCleanup(cityPath, report.PID, report.Port, fmt.Errorf("dolt server on %s:%d is still read-only after recovery", managedDoltConnectHost(host), report.Port))
+		return report, recordFailure(cause)
 	}
 	report.Healthy = health.QueryReady
 	if !report.Healthy {
-		return report, ops.failedCleanup(cityPath, report.PID, report.Port, fmt.Errorf("dolt server on %s:%d is not query-ready after recovery", managedDoltConnectHost(host), report.Port))
+		cause := ops.failedCleanup(cityPath, report.PID, report.Port, fmt.Errorf("dolt server on %s:%d is not query-ready after recovery", managedDoltConnectHost(host), report.Port))
+		return report, recordFailure(cause)
 	}
 	if err := ops.publish(cityPath); err != nil {
-		return report, ops.failedCleanup(cityPath, report.PID, report.Port, fmt.Errorf("publish managed dolt runtime state: %w", err))
+		cause := ops.failedCleanup(cityPath, report.PID, report.Port, fmt.Errorf("publish managed dolt runtime state: %w", err))
+		return report, recordFailure(cause)
+	}
+	if err := managedDoltCircuitMarkHealthy(cityPath, report.PID, ops.nowOrTime()); err != nil {
+		return report, fmt.Errorf("mark managed dolt circuit healthy: %w", err)
 	}
 	return report, nil
 }

@@ -148,12 +148,39 @@ func startManagedDoltProcess(cityPath, host, port, user, logLevel string, timeou
 
 //nolint:unparam // archiveLevel is an explicit override hook; current callers use config/env fallback.
 func startManagedDoltProcessWithOptions(cityPath, host, port, user, logLevel string, archiveLevel int, timeout time.Duration, publish bool) (managedDoltStartReport, error) {
+	lockFile, _, err := openManagedDoltLifecycleLock(cityPath)
+	if err != nil {
+		return managedDoltStartReport{}, err
+	}
+	locked, err := tryManagedDoltLifecycleLock(lockFile)
+	if err != nil {
+		_ = lockFile.Close()
+		return managedDoltStartReport{}, err
+	}
+	if !locked {
+		_ = lockFile.Close()
+		return managedDoltStartReport{}, fmt.Errorf("managed dolt lifecycle is already owned by another reconciler")
+	}
+	defer releaseManagedDoltLifecycleLock(lockFile)
+	return startManagedDoltProcessWithOptionsUnlocked(cityPath, host, port, user, logLevel, archiveLevel, timeout, publish)
+}
+
+// startManagedDoltProcessWithOptionsUnlocked starts a managed server while the
+// caller owns the lifecycle lock. Recovery uses this form because it already
+// holds the lock across probe, stop, preflight, start, and readiness checks.
+func startManagedDoltProcessWithOptionsUnlocked(cityPath, host, port, user, logLevel string, archiveLevel int, timeout time.Duration, publish bool) (managedDoltStartReport, error) {
 	layout, err := resolveManagedDoltRuntimeLayout(cityPath)
 	if err != nil {
 		return managedDoltStartReport{}, err
 	}
-	if err := checkManagedDoltDiskPreflight(layout.DataDir, doltDiskMinFreeBytes(), doltDiskWarnFreeBytes(), os.Stderr); err != nil {
-		return managedDoltStartReport{}, err
+	// Test watchdog processes deliberately use temporary layouts whose data
+	// directory is created by the fake server. Keep the production disk gate
+	// active while allowing those isolated process tests to exercise lifecycle
+	// behavior without a real statfs target.
+	if !managedDoltTestModeEnabled() {
+		if err := checkManagedDoltDiskPreflight(layout.DataDir, doltDiskMinFreeBytes(), doltDiskWarnFreeBytes(), os.Stderr); err != nil {
+			return managedDoltStartReport{}, err
+		}
 	}
 	portNum, err := strconv.Atoi(strings.TrimSpace(port))
 	if err != nil || portNum <= 0 {

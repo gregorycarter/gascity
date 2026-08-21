@@ -444,6 +444,14 @@ func newDoltStateCmd(stdout, stderr io.Writer) *cobra.Command {
 					return errExit
 				}
 			}
+			if circuit, circuitErr := readManagedDoltCircuitState(cityPath); circuitErr == nil {
+				for _, line := range managedDoltCircuitFields(circuit) {
+					if _, writeErr := fmt.Fprintln(stdout, line); writeErr != nil {
+						fmt.Fprintf(stderr, "gc dolt-state recover-managed: %v\n", writeErr) //nolint:errcheck
+						return errExit
+					}
+				}
+			}
 			if err != nil {
 				fmt.Fprintf(stderr, "gc dolt-state recover-managed: %v\n", err) //nolint:errcheck
 				return errExit
