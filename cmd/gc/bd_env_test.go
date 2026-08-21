@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -74,6 +75,67 @@ func requireErrorContains(t *testing.T, err error, want string) {
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("error = %q, want containing %q", err.Error(), want)
 	}
+}
+
+func writeReachableManagedDoltStateForRuntimeFallback(t *testing.T, cityPath, statePath string) int {
+	t.Helper()
+
+	dataDir := filepath.Join(cityPath, ".beads", "dolt")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", dataDir, err)
+	}
+	port := reserveRandomTCPPort(t)
+	listener := exec.Command("python3", "-c", `
+import signal
+import socket
+import sys
+import time
+port = int(sys.argv[1])
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("127.0.0.1", port))
+sock.listen(5)
+def _stop(*_args):
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, _stop)
+signal.signal(signal.SIGINT, _stop)
+while True:
+    time.sleep(1)
+`, strconv.Itoa(port))
+	listener.Dir = dataDir
+	if err := listener.Start(); err != nil {
+		t.Fatalf("start managed Dolt listener: %v", err)
+	}
+	t.Cleanup(func() {
+		if listener.Process != nil {
+			_ = listener.Process.Kill()
+		}
+		_ = listener.Wait()
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	ready := false
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 200*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			ready = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatalf("managed Dolt listener on %d did not become ready", port)
+	}
+	if err := writeDoltRuntimeStateFile(statePath, doltRuntimeState{
+		Running:   true,
+		PID:       listener.Process.Pid,
+		Port:      port,
+		DataDir:   dataDir,
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("write managed Dolt state: %v", err)
+	}
+	return port
 }
 
 // TestBdCommandRunnerForCityCompleteStorageBindingSkipsManagedRetry runs a real
@@ -1364,7 +1426,15 @@ dolt.auto-start: false
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeReachableProviderManagedDoltState(t, cityPath)
+	writeReachableManagedDoltStateForRuntimeFallback(t, cityPath, providerManagedDoltStatePath(cityPath))
+	if err := writeDoltRuntimeStateFile(managedDoltStatePath(cityPath), doltRuntimeState{
+		// An invalid canonical state forces the resolver through the managed
+		// recovery path, where the provider state can report that this
+		// lifecycle is not owned by gc.
+		DataDir: filepath.Join(cityPath, ".beads", "dolt"),
+	}); err != nil {
+		t.Fatalf("write canonical Dolt state: %v", err)
+	}
 
 	target, ok, err := resolvedRuntimeCityDoltTarget(cityPath, true)
 	if err == nil {
@@ -1398,7 +1468,7 @@ dolt.auto-start: false
 		t.Fatal(err)
 	}
 
-	port := writeReachableProviderManagedDoltState(t, cityPath)
+	port := writeReachableManagedDoltStateForRuntimeFallback(t, cityPath, providerManagedDoltStatePath(cityPath))
 
 	// Make the dolt state dir read-only to force publishManagedDoltRuntimeStateFromState
 	// to fail — it cannot write dolt-state.json to the read-only directory.
@@ -2865,28 +2935,10 @@ dolt.auto-start: false
 
 func TestBdRuntimeEnvForRigFallsBackToManagedCityPort(t *testing.T) {
 	cityDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(cityDir, ".gc", "runtime", "packs", "dolt"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer func() { _ = ln.Close() }() //nolint:errcheck // test cleanup
-
-	if err := writeDoltState(cityDir, doltRuntimeState{
-		Running:   true,
-		PID:       os.Getpid(),
-		Port:      ln.Addr().(*net.TCPAddr).Port,
-		DataDir:   filepath.Join(cityDir, ".beads", "dolt"),
-		StartedAt: "2026-04-02T08:00:00Z",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	port := writeReachableManagedDoltStateForRuntimeFallback(t, cityDir, managedDoltStatePath(cityDir))
 
 	rigDir := filepath.Join(t.TempDir(), "repo")
 	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0o700); err != nil {
@@ -2894,7 +2946,7 @@ func TestBdRuntimeEnvForRigFallsBackToManagedCityPort(t *testing.T) {
 	}
 
 	env := mustBdRuntimeEnvForRig(t, cityDir, &config.City{}, rigDir)
-	want := strings.TrimSpace(strings.TrimPrefix(ln.Addr().String(), "127.0.0.1:"))
+	want := strconv.Itoa(port)
 	if got := env["GC_DOLT_PORT"]; got != want {
 		t.Fatalf("GC_DOLT_PORT = %q, want %q", got, want)
 	}
