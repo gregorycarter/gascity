@@ -29,9 +29,23 @@ const (
 	hookClaimReasonNoWork        = "no_work"
 	hookClaimReasonClaimsErrored = "claims_errored"
 	hookClaimReasonStaleSession  = "stale_session"
+	hookClaimReasonRecovery      = "recovery_needed"
 )
 
 var hookClaimMutationTimeout = 10 * time.Second
+
+const hookClaimRetryAttempts = 3
+
+var hookClaimRetrySleep = time.Sleep
+
+func hookClaimRetryDelay(attempt int) time.Duration {
+	base := time.Duration(attempt*5) * time.Millisecond
+	if base <= 0 {
+		return 0
+	}
+	jitter := time.Duration(time.Now().UnixNano() % int64(base))
+	return base + jitter
+}
 
 var hookClaimCommandRunnerWithEnvContext = beads.ExecCommandRunnerWithEnvContext
 
@@ -77,6 +91,11 @@ type hookClaimOps struct {
 	// not-found from ONE leg be checked against the others before it opens the
 	// escalation. See claim_class_route.go.
 	ClassRoute *hookClaimClassRoute
+	// RequirePostClaimRecovery makes claim-landed failures in required
+	// identity/continuation work explicit instead of treating them as optional
+	// publication failures. Production hook claims enable this; legacy direct
+	// callers can retain the compatibility behavior while migrating.
+	RequirePostClaimRecovery bool
 }
 
 type (
@@ -91,18 +110,27 @@ type (
 )
 
 type hookClaimJSONResult struct {
-	SchemaVersion        string   `json:"schema_version"`
-	OK                   bool     `json:"ok"`
-	Command              string   `json:"command"`
-	Action               string   `json:"action"`
-	Reason               string   `json:"reason,omitempty"`
-	BeadID               string   `json:"bead_id,omitempty"`
-	Assignee             string   `json:"assignee,omitempty"`
-	Route                string   `json:"route,omitempty"`
-	RootBeadID           string   `json:"root_bead_id,omitempty"`
-	ContinuationGroup    string   `json:"continuation_group,omitempty"`
-	ContinuationAssigned []string `json:"continuation_assigned,omitempty"`
-	DrainAcknowledged    bool     `json:"drain_acknowledged,omitempty"`
+	SchemaVersion        string          `json:"schema_version"`
+	OK                   bool            `json:"ok"`
+	Command              string          `json:"command"`
+	Action               string          `json:"action"`
+	Reason               string          `json:"reason,omitempty"`
+	BeadID               string          `json:"bead_id,omitempty"`
+	Assignee             string          `json:"assignee,omitempty"`
+	Route                string          `json:"route,omitempty"`
+	RootBeadID           string          `json:"root_bead_id,omitempty"`
+	ContinuationGroup    string          `json:"continuation_group,omitempty"`
+	ContinuationAssigned []string        `json:"continuation_assigned,omitempty"`
+	DrainAcknowledged    bool            `json:"drain_acknowledged,omitempty"`
+	RecoveryNeeded       bool            `json:"recovery_needed,omitempty"`
+	RecoveryAction       string          `json:"recovery_action,omitempty"`
+	Error                *hookClaimError `json:"error,omitempty"`
+}
+
+type hookClaimError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	BeadID  string `json:"bead_id,omitempty"`
 }
 
 // hookClaimResult is the outcome of attempting a claim against one store's
@@ -189,7 +217,26 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 	// a priority band.
 	beads.SortBeadsReadyOrder(candidates)
 
-	if result, bead, ok := hookClaimExistingAssignment(candidates, *opts); ok {
+	result, bead, ok := hookClaimExistingAssignment(candidates, *opts)
+	if ok {
+		if ops.RequirePostClaimRecovery {
+			ctx, cancel := context.WithTimeout(context.Background(), hookClaimMutationTimeout)
+			authoritative, err := ops.ReadWorkMeta(ctx, dir, opts.Env, bead.ID, bead.Assignee)
+			cancel()
+			if err != nil {
+				return hookClaimResult{terminal: true, code: writeHookClaimRecovery(bead.ID, bead.Assignee, fmt.Errorf("verifying existing assignment %s: %w", bead.ID, err), opts.JSON, stdout, stderr)}
+			}
+			if !strings.EqualFold(strings.TrimSpace(authoritative.Status), "in_progress") ||
+				!hookClaimHasIdentity(authoritative.Assignee, opts.IdentityCandidates) {
+				result, bead, ok = hookClaimJSONResult{}, beads.Bead{}, false
+			} else {
+				bead = mergeHookClaimCandidateMetadata(bead, authoritative)
+				result.BeadID = bead.ID
+				result.Assignee = bead.Assignee
+			}
+		}
+	}
+	if ok {
 		return hookClaimResult{terminal: true, code: writeHookClaimWorkResultForBead(result, bead, *opts, *ops, dir, stdout, stderr)}
 	}
 
@@ -274,8 +321,11 @@ func claimFirstReadyHookAssignment(candidates []beads.Bead, opts hookClaimOption
 		// or alias; bd's idempotent --claim path requires the actor to match the
 		// existing assignee exactly.
 		claimActor := strings.TrimSpace(candidate.Assignee)
-		claimed, ok, err := ops.Claim(ctx, dir, opts.Env, candidate.ID, claimActor)
+		claimed, ok, err := claimHookCandidateWithRetry(ctx, dir, opts.Env, candidate.ID, claimActor, ops.Claim)
 		if err != nil {
+			if errors.Is(err, beads.ErrCommitIndeterminate) {
+				return hookClaimResult{terminal: true, code: writeHookClaimRecovery(candidate.ID, claimActor, err, opts.JSON, stdout, stderr)}
+			}
 			if !ok && (hookClaimBeadIsElsewhere(err) || hookClaimBindingRefusedTheClaim(err)) {
 				// The read federated and the write did not: the assigned tier
 				// reads city-wide, so a graph step in a relocated class store
@@ -314,6 +364,9 @@ func claimFirstReadyHookAssignment(candidates []beads.Bead, opts hookClaimOption
 		}
 		if !strings.EqualFold(strings.TrimSpace(claimed.Status), "in_progress") ||
 			strings.TrimSpace(claimed.Assignee) != claimActor {
+			if ops.RequirePostClaimRecovery {
+				return hookClaimResult{terminal: true, code: writeHookClaimRecovery(candidate.ID, claimActor, fmt.Errorf("claim postcondition for %s did not verify authoritative ownership: status=%q assignee=%q", candidate.ID, claimed.Status, claimed.Assignee), opts.JSON, stdout, stderr)}
+			}
 			_, _ = fmt.Fprintf(
 				stderr,
 				"gc hook --claim: ready assignment %s claim readback remained status=%q assignee=%q; want in_progress owned by this session\n",
@@ -386,8 +439,11 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 			// next tick (NDI).
 			break
 		}
-		claimed, ok, err := ops.Claim(ctx, dir, opts.Env, candidate.ID, opts.Assignee)
+		claimed, ok, err := claimHookCandidateWithRetry(ctx, dir, opts.Env, candidate.ID, opts.Assignee, ops.Claim)
 		if err != nil {
+			if errors.Is(err, beads.ErrCommitIndeterminate) {
+				return hookClaimResult{terminal: true, code: writeHookClaimRecovery(candidate.ID, opts.Assignee, err, opts.JSON, stdout, stderr)}
+			}
 			if ok {
 				// The atomic mutation committed, but its canonical readback failed.
 				// Stop immediately: trying another candidate or draining would strand
@@ -408,6 +464,11 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 		if !ok {
 			reportHookClaimRejected(candidate, claimed, opts, ops)
 			continue
+		}
+		if ops.RequirePostClaimRecovery &&
+			(!strings.EqualFold(strings.TrimSpace(claimed.Status), "in_progress") ||
+				!hookClaimHasIdentity(claimed.Assignee, []string{opts.Assignee})) {
+			return hookClaimResult{terminal: true, code: writeHookClaimRecovery(candidate.ID, opts.Assignee, fmt.Errorf("claim postcondition for %s did not verify authoritative ownership: status=%q assignee=%q", candidate.ID, claimed.Status, claimed.Assignee), opts.JSON, stdout, stderr)}
 		}
 		claimed = mergeHookClaimCandidateMetadata(candidate, claimed)
 		result := hookClaimJSONResult{
@@ -430,6 +491,23 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 	}
 
 	return hookClaimResult{claimsErrored: claimsErrored}
+}
+
+func claimHookCandidateWithRetry(ctx context.Context, dir string, env []string, beadID, assignee string, claim hookClaimFunc) (beads.Bead, bool, error) {
+	for attempt := 1; attempt <= hookClaimRetryAttempts; attempt++ {
+		claimed, ok, err := claim(ctx, dir, env, beadID, assignee)
+		if err == nil || !beads.IsDefinitePreCommitAbort(err) || attempt == hookClaimRetryAttempts {
+			return claimed, ok, err
+		}
+		delay := hookClaimRetryDelay(attempt)
+		select {
+		case <-ctx.Done():
+			return beads.Bead{}, false, ctx.Err()
+		default:
+		}
+		hookClaimRetrySleep(delay)
+	}
+	return beads.Bead{}, false, context.Canceled
 }
 
 // mergeHookClaimCandidateMetadata retains work-query metadata when bd update
@@ -503,7 +581,10 @@ func hookClaimCandidateIsMessage(candidate beads.Bead) bool {
 func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, stdout, stderr io.Writer) int {
 	result.RootBeadID = strings.TrimSpace(bead.Metadata[beadmeta.RootBeadIDMetadataKey])
 	result.ContinuationGroup = strings.TrimSpace(bead.Metadata[beadmeta.ContinuationGroupMetadataKey])
-	durable, stamped := stampHookClaimIdentity(bead, opts, ops, dir, stderr)
+	durable, stamped, stampErr := stampHookClaimIdentity(bead, opts, ops, dir, stderr)
+	if stampErr != nil && ops.RequirePostClaimRecovery {
+		return writeHookClaimRecovery(bead.ID, opts.Assignee, stampErr, opts.JSON, stdout, stderr)
+	}
 	if stamped && hookClaimLifecycleCandidate(durable, opts) {
 		ops.EmitExecutionStepStarted(durable, dir, opts.Env, opts.Assignee)
 	}
@@ -511,6 +592,9 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 	assigned, err := preassignHookContinuationGroup(bead, opts, ops, dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc hook --claim: preassigning continuation group for %s: %v\n", bead.ID, err) //nolint:errcheck
+		if ops.RequirePostClaimRecovery {
+			return writeHookClaimRecovery(bead.ID, opts.Assignee, err, opts.JSON, stdout, stderr)
+		}
 		return 1
 	}
 	result.ContinuationAssigned = assigned
@@ -523,6 +607,40 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 	}
 	fmt.Fprintln(stdout, result.BeadID) //nolint:errcheck
 	return 0
+}
+
+func writeHookClaimRecovery(beadID, assignee string, claimErr error, jsonOut bool, stdout, stderr io.Writer) int {
+	result := hookClaimJSONResult{
+		SchemaVersion:  "1",
+		OK:             true,
+		Command:        hookClaimCommandName,
+		Action:         "recovery_needed",
+		Reason:         hookClaimReasonRecovery,
+		BeadID:         strings.TrimSpace(beadID),
+		Assignee:       strings.TrimSpace(assignee),
+		RecoveryNeeded: true,
+		RecoveryAction: "verify_claim_and_complete_post_claim_steps",
+		Error: &hookClaimError{
+			Code:    hookClaimRecoveryErrorCode(claimErr),
+			Message: claimErr.Error(),
+			BeadID:  strings.TrimSpace(beadID),
+		},
+	}
+	if jsonOut {
+		if err := writeCLIJSONLine(stdout, result); err != nil {
+			fmt.Fprintf(stderr, "gc hook --claim: writing recovery JSON: %v\n", err) //nolint:errcheck
+		}
+	} else {
+		fmt.Fprintf(stderr, "gc hook --claim: recovery needed for claimed bead %s (%s): %v\n", beadID, assignee, claimErr) //nolint:errcheck
+	}
+	return 1
+}
+
+func hookClaimRecoveryErrorCode(err error) string {
+	if errors.Is(err, beads.ErrCommitIndeterminate) {
+		return "claim_commit_indeterminate"
+	}
+	return "post_claim_recovery"
 }
 
 // writeHookClaimNoWork writes the single drain result for a hook that claimed
@@ -656,12 +774,18 @@ func hookClaimThroughStore(beadID, assignee string, claim func() (beads.Bead, bo
 		// as ours.
 		return claimed, false, nil
 	}
+	if !strings.EqualFold(strings.TrimSpace(claimed.Status), "in_progress") {
+		return claimed, true, fmt.Errorf("claim postcondition for %q reported status %q: %w", beadID, claimed.Status, beads.ErrCommitIndeterminate)
+	}
 	canonical, err := get(beadID)
 	if err != nil {
-		return claimed, true, fmt.Errorf("reloading claimed bead %q: %w", beadID, err)
+		return claimed, true, fmt.Errorf("reloading claimed bead %q: %w: %w", beadID, beads.ErrCommitIndeterminate, err)
 	}
 	if !hookClaimHasIdentity(canonical.Assignee, []string{assignee}) {
 		return canonical, false, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(canonical.Status), "in_progress") {
+		return canonical, true, fmt.Errorf("claim postcondition for %q read status %q: %w", beadID, canonical.Status, beads.ErrCommitIndeterminate)
 	}
 	return canonical, true, nil
 }
@@ -678,35 +802,36 @@ func hookClaimThroughStore(beadID, assignee string, claim func() (beads.Bead, bo
 // write is issued only when at least one key actually changes: this runs again on
 // every hook tick via the existing_assignment / ready_assignment adoption paths, so
 // an unconditional write would emit a bead.updated per tick per in-progress bead
-// (the cache-reconcile flood class). Best-effort: a missing repo, detached HEAD,
-// absent session, or write error never blocks the claim.
-func stampHookClaimIdentity(bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, stderr io.Writer) (beads.Bead, bool) {
+// (the cache-reconcile flood class). The compatibility mode keeps missing repo,
+// detached HEAD, absent session, and write errors best-effort; production mode
+// turns required write/readback failures into recovery-needed output.
+func stampHookClaimIdentity(bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, stderr io.Writer) (beads.Bead, bool, error) {
 	patch := hookClaimIdentityPatch(bead, opts, ops, dir)
 	sessionID := hookClaimSessionID(opts.Env)
 	needsLifecycleIdentity := sessionID != "" && !beadmeta.IsControlKind(strings.TrimSpace(bead.Metadata[beadmeta.KindMetadataKey]))
 	if len(patch) == 0 {
 		return bead, needsLifecycleIdentity && strings.EqualFold(strings.TrimSpace(bead.Status), "in_progress") &&
-			strings.TrimSpace(bead.Metadata[beadmeta.SessionIDMetadataKey]) == sessionID
+			strings.TrimSpace(bead.Metadata[beadmeta.SessionIDMetadataKey]) == sessionID, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), hookClaimMutationTimeout)
 	defer cancel()
 	if err := ops.StampWorkMeta(ctx, dir, opts.Env, bead.ID, opts.Assignee, patch); err != nil {
 		fmt.Fprintf(stderr, "gc hook --claim: stamping execution identity on %s: %v\n", bead.ID, err) //nolint:errcheck
-		return beads.Bead{}, false
+		return beads.Bead{}, false, fmt.Errorf("stamping execution identity on %s: %w", bead.ID, err)
 	}
 	if !needsLifecycleIdentity {
-		return beads.Bead{}, false
+		return beads.Bead{}, false, nil
 	}
 	readback, err := ops.ReadWorkMeta(ctx, dir, opts.Env, bead.ID, opts.Assignee)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc hook --claim: reading stamped execution identity on %s: %v\n", bead.ID, err) //nolint:errcheck
-		return beads.Bead{}, false
+		return beads.Bead{}, false, fmt.Errorf("reading stamped execution identity on %s: %w", bead.ID, err)
 	}
 	if !strings.EqualFold(strings.TrimSpace(readback.Status), "in_progress") ||
 		strings.TrimSpace(readback.Metadata[beadmeta.SessionIDMetadataKey]) != sessionID {
-		return beads.Bead{}, false
+		return beads.Bead{}, false, fmt.Errorf("stamped execution identity on %s did not verify authoritative ownership", bead.ID)
 	}
-	return readback, true
+	return readback, true, nil
 }
 
 // hookClaimLifecycleCandidate reports whether a bead can be a session-owned

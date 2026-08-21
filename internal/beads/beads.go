@@ -6,7 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	beadslib "github.com/steveyegge/beads"
 )
 
 // ErrNotFound is returned when a bead ID does not exist in the store.
@@ -58,6 +61,24 @@ var ErrConditionalWriteUnsupported = errors.New("conditional writes unsupported"
 // backend. Detection requires bd's paired fallback markers: "auto-importing"
 // and "into empty database".
 var ErrBDSilentFallback = errors.New("bd silent fallback to on-disk auto-import")
+
+// ErrCommitIndeterminate is the Beads write-outcome sentinel. A mutation that
+// wraps it may have committed and must never be replayed without recovery.
+var ErrCommitIndeterminate = beadslib.ErrCommitIndeterminate
+
+// IsDefinitePreCommitAbort reports errors that prove a claim transaction was
+// rejected before commit. Only these errors are safe for a bounded retry.
+func IsDefinitePreCommitAbort(err error) bool {
+	if err == nil || errors.Is(err, ErrCommitIndeterminate) {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "error 1213 (40001): serialization failure") ||
+		strings.Contains(message, "error 1205") ||
+		strings.Contains(message, "this transaction conflicts with a committed transaction") ||
+		strings.Contains(message, "sqlite_busy") ||
+		strings.Contains(message, "sqlite_locked")
+}
 
 // Bead is a single unit of work in Gas City. Everything is a bead: tasks,
 // mail, molecules, convoys.

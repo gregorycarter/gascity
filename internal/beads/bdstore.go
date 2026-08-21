@@ -1541,8 +1541,11 @@ func bdSQLStringLiteral(value string) string {
 // The caller controls the claim actor through the store's CommandRunner
 // environment, typically BEADS_ACTOR.
 func (s *BdStore) Claim(id string) (Bead, bool, error) {
-	out, err := s.runBDTransientWriteOutput("update", id, "--claim", "--json")
+	out, err := s.runBDClaimOutput("update", id, "--claim", "--json")
 	if err != nil {
+		if isBdClaimCommitIndeterminate(out, err) {
+			return Bead{}, false, fmt.Errorf("claiming bead %q: %w: %w", id, ErrCommitIndeterminate, err)
+		}
 		msg := strings.TrimSpace(string(out))
 		if isBdClaimConflictMessage(msg) || isBdClaimConflictMessage(err.Error()) {
 			return Bead{}, false, nil
@@ -1560,6 +1563,19 @@ func (s *BdStore) Claim(id string) (Bead, bool, error) {
 		return Bead{}, false, fmt.Errorf("claiming bead %q: %w", id, err)
 	}
 	return claimed, true, nil
+}
+
+func (s *BdStore) runBDClaimOutput(args ...string) ([]byte, error) {
+	return s.runBDTransientWriteOutputWhen(IsDefinitePreCommitAbort, args...)
+}
+
+func isBdClaimCommitIndeterminate(out []byte, err error) bool {
+	if errors.Is(err, ErrCommitIndeterminate) {
+		return true
+	}
+	message := strings.ToLower(string(out) + " " + err.Error())
+	return strings.Contains(message, "commit result indeterminate") ||
+		strings.Contains(message, "commit response lost")
 }
 
 func parseBDMutationBead(op string, out []byte) (Bead, error) {

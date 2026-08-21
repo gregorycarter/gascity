@@ -24,7 +24,8 @@
     "action": {
       "enum": [
         "work",
-        "drain"
+        "drain",
+        "recovery_needed"
       ]
     },
     "reason": {
@@ -34,7 +35,8 @@
         "ready_assignment",
         "no_work",
         "claims_errored",
-        "stale_session"
+        "stale_session",
+        "recovery_needed"
       ]
     },
     "bead_id": {
@@ -60,6 +62,28 @@
     },
     "drain_acknowledged": {
       "type": "boolean"
+    },
+    "recovery_needed": {
+      "type": "boolean"
+    },
+    "recovery_action": {
+      "type": "string"
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "bead_id": {
+          "type": "string"
+        }
+      }
     }
   },
   "allOf": [
@@ -102,6 +126,27 @@
             ]
           }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "recovery_needed"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "bead_id",
+          "assignee",
+          "recovery_needed",
+          "recovery_action",
+          "error"
+        ]
       }
     }
   ]
