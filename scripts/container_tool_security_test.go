@@ -65,17 +65,18 @@ func TestContainerCLIToolsRebuildWithPatchedGRPC(t *testing.T) {
 
 func TestAgentImageRebuildsBDAndGCWithPatchedGRPC(t *testing.T) {
 	const (
-		bdSourceRef    = "bf97b73749ac3ef2fca2365b54537ac041ad4293"
-		bdSourceSHA256 = "a8b1d8dd85b2c008093615cb85937067a9597e760e8d39f93fe55f5c1cbb4d37"
-		bdBuild        = "bf97b73749"
+		bdVersion      = "v1.2.1"
+		bdSourceRef    = "6c35a31db1ea450f15ad7290efd86089931a713d"
+		bdSourceSHA256 = "74f3f94227d93d829913aa2a7539cd661a8221742112f12bf9a4595867535693"
+		bdBuild        = "6c35a31db1"
 		bdBranch       = "HEAD"
-		grpcVersion    = "1.82.1"
+		grpcVersion    = "1.83.0"
 	)
 
 	root := repoRoot(t)
-	bdVersion := readDotenv(t, root+"/deps.env")["BD_VERSION"]
-	if bdVersion != "v1.1.0" {
-		t.Fatalf("deps.env BD_VERSION = %q, want v1.1.0 for the pinned source build", bdVersion)
+	installableVersion := readDotenv(t, root+"/deps.env")["BD_VERSION"]
+	if installableVersion != "v1.1.0" {
+		t.Fatalf("deps.env BD_VERSION = %q, want v1.1.0 for the installable release pin", installableVersion)
 	}
 
 	dockerfile := readFile(t, root, "contrib/k8s/Dockerfile.agent")

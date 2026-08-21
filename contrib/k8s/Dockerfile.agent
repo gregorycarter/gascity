@@ -19,16 +19,17 @@ ARG BASE_IMAGE=gc-agent-base:latest
 
 FROM golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651 AS bd-builder
 
-ARG BD_VERSION=v1.1.0
-ARG BD_SOURCE_REF=bf97b73749ac3ef2fca2365b54537ac041ad4293
-ARG BD_SOURCE_SHA256=a8b1d8dd85b2c008093615cb85937067a9597e760e8d39f93fe55f5c1cbb4d37
-ARG BD_BUILD=bf97b73749
+ARG BD_VERSION=v1.2.1
+ARG BD_SOURCE_REF=6c35a31db1ea450f15ad7290efd86089931a713d
+ARG BD_SOURCE_SHA256=74f3f94227d93d829913aa2a7539cd661a8221742112f12bf9a4595867535693
+ARG BD_BUILD=6c35a31db1
 ARG BD_BRANCH=HEAD
-ARG GRPC_VERSION=1.82.1
+ARG GRPC_VERSION=1.83.0
 
-# The published bd 1.1.0 binary embeds vulnerable grpc-go 1.80.0. Rebuild the
-# exact released source with its production CGO/pure-Go-regex configuration and
-# release identity, changing only the patched dependency version.
+# Build the pinned schema-v65 source revision with the production
+# CGO/pure-Go-regex configuration and a patched grpc-go dependency. The
+# installable release pin remains separate because the published recovery
+# releases predate schema v65.
 RUN mkdir -p /src/bd /out \
     && curl -fsSL --retry 3 \
        "https://github.com/gastownhall/beads/archive/${BD_SOURCE_REF}.tar.gz" \
