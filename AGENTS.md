@@ -447,6 +447,30 @@ GOCACHE="$tmp" TMPDIR="$tmp" go build ./cmd/gc/
 test-result cache, not the compiled-object cache, and does not corrupt
 concurrent builds.
 
+## macOS ICU/CGO build prerequisites
+
+On macOS, the Dolt dependency `go-icu-regex` uses CGO. Homebrew's `icu4c`
+formula is keg-only, so a bare `go build` or `go test` may fail with a missing
+`unicode/regex.h` header even when the working tree is correct. Use `make
+build` and `make test` as the normal build and test entry points; the Makefile
+discovers Homebrew's ICU prefix and exports the required CGO flags.
+
+The `.githooks/pre-commit` hook runs its Go generators directly (`go run` and
+`go generate`), outside the Makefile. Before committing staged Go changes on
+macOS, export the same flags so the hook can find ICU:
+
+```bash
+ICU_PREFIX="$(brew --prefix icu4c)"
+export CGO_CPPFLAGS="-I${ICU_PREFIX}/include"
+export CGO_LDFLAGS="-L${ICU_PREFIX}/lib"
+git commit
+```
+
+If `brew --prefix icu4c` fails, install the prerequisite with
+`HOMEBREW_NO_AUTO_UPDATE=1 brew install icu4c`. A missing ICU header from a
+raw Go command is an environment prerequisite failure, not evidence that the
+working diff introduced a regression.
+
 ## Code quality gates
 
 Before considering any task complete:
